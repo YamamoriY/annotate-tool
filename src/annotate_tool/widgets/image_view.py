@@ -293,20 +293,40 @@ class ImageView(QGraphicsView):
             self._paint_item.setPath(self._paint_path)
 
     def painted_polygons(self) -> list[list[float]]:
-        """塗った領域を COCO polygon 列(画像座標)へ変換して返す。空なら []。"""
+        """塗った領域を COCO polygon 列(画像座標)へ変換して返す。空なら []。
+
+        simplified() は自己接触点に極小の退化ループ(スリバー)を作り、塗り残しは
+        逆巻きの穴輪郭を作る。前者は細い横線として、後者は余計なリングとして
+        描画されてしまうため、面積と巻き向きで除外する。
+        """
         if self._paint_path is None or self._paint_path.isEmpty():
             return []
-        result: list[list[float]] = []
+
+        contours: list[tuple[list[tuple[float, float]], float]] = []
         for poly in self._paint_path.simplified().toSubpathPolygons():
             pts = [(p.x(), p.y()) for p in poly]
             if len(pts) >= 2 and pts[0] == pts[-1]:
                 pts = pts[:-1]  # 末尾の始点複製を落とす
             cleaned = _dedup_points(pts)
             if len(cleaned) >= 3:
-                flat: list[float] = []
-                for x, y in cleaned:
-                    flat.extend((round(float(x), 2), round(float(y), 2)))
-                result.append(flat)
+                contours.append((cleaned, _signed_area(cleaned)))
+        if not contours:
+            return []
+
+        # 最大輪郭の巻き向きを「外周」とみなし、逆向き(穴)と極小(スリバー)を捨てる
+        outer_positive = max(contours, key=lambda c: abs(c[1]))[1] >= 0
+        min_area = (style.BRUSH_RADIUS * 0.5) ** 2
+
+        result: list[list[float]] = []
+        for cleaned, area in contours:
+            if abs(area) < min_area:
+                continue  # 自己接触部の退化ループ(細い横線の正体)
+            if (area >= 0) != outer_positive:
+                continue  # 塗り残しの穴(逆巻き)は塗り領域にしない
+            flat: list[float] = []
+            for x, y in cleaned:
+                flat.extend((round(float(x), 2), round(float(y), 2)))
+            result.append(flat)
         return result
 
     # --- パン(中ボタンドラッグ)----------------------------------------------
@@ -418,3 +438,14 @@ def _dedup_points(
         if not cleaned or math.hypot(p[0] - cleaned[-1][0], p[1] - cleaned[-1][1]) >= min_dist:
             cleaned.append(p)
     return cleaned
+
+
+def _signed_area(pts: list[tuple[float, float]]) -> float:
+    """多角形の符号付き面積(靴ひも公式)。符号は巻き向きを表す。"""
+    s = 0.0
+    n = len(pts)
+    for i in range(n):
+        x1, y1 = pts[i]
+        x2, y2 = pts[(i + 1) % n]
+        s += x1 * y2 - x2 * y1
+    return s / 2.0

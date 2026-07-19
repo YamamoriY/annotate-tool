@@ -26,13 +26,13 @@ from annotate_tool.coco_data import Annotation
 class ImageView(QGraphicsView):
     """ホイールでズーム、矩形ドラッグで複数選択できる画像表示ビュー。
 
-    パンは中ボタンドラッグ、または Space を押しながらの左ドラッグで行う。
+    左ドラッグは矩形選択(触れたインスタンスを選択に追加)、パンは中ボタンドラッグ。
     """
 
     # 単一クリック: (インスタンス番号, additive=Shift)
     instanceClicked = Signal(int, bool)
-    # 矩形選択: (触れたインスタンス番号のリスト, additive=Shift)
-    rectSelected = Signal(object, bool)
+    # 矩形選択: 触れたインスタンス番号のリスト(常に選択へ追加)
+    rectSelected = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -45,8 +45,6 @@ class ImageView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
         self.setBackgroundBrush(QBrush(style.VIEW_BACKGROUND))
-        # Space によるパン切り替えのためキーイベントを受け取れるようにする
-        self.setFocusPolicy(Qt.StrongFocus)
 
         self._pixmap_item: QGraphicsPixmapItem | None = None
         self._dim_item: QGraphicsRectItem | None = None
@@ -56,7 +54,6 @@ class ImageView(QGraphicsView):
         self._selected: set[int] = set()
 
         # 操作状態
-        self._space_held = False  # Space 押下中は左ドラッグでパン
         self._press_pos: QPoint | None = None  # 左押下位置(クリック/ドラッグ判定用)
         self._panning = False  # 中ボタンによるパン中か
         self._pan_origin: QPoint | None = None  # パン開始時のマウス位置
@@ -187,19 +184,7 @@ class ImageView(QGraphicsView):
         factor = style.ZOOM_STEP if event.angleDelta().y() > 0 else 1 / style.ZOOM_STEP
         self.scale(factor, factor)
 
-    # --- パン(中ボタン / Space+左ドラッグ)------------------------------------
-    def keyPressEvent(self, event) -> None:
-        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
-            self._space_held = True
-            self.setDragMode(QGraphicsView.ScrollHandDrag)
-        super().keyPressEvent(event)
-
-    def keyReleaseEvent(self, event) -> None:
-        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
-            self._space_held = False
-            self.setDragMode(QGraphicsView.RubberBandDrag)
-        super().keyReleaseEvent(event)
-
+    # --- パン(中ボタンドラッグ)----------------------------------------------
     def _pan_by(self, delta: QPoint) -> None:
         h, v = self.horizontalScrollBar(), self.verticalScrollBar()
         h.setValue(h.value() - delta.x())
@@ -223,10 +208,10 @@ class ImageView(QGraphicsView):
             self.setCursor(Qt.ClosedHandCursor)
             event.accept()
             return
-        if event.button() == Qt.LeftButton and not self._space_held:
+        if event.button() == Qt.LeftButton:
             # クリックとドラッグ(矩形選択)を release 時に判別するため位置を記録
             self._press_pos = event.pos()
-        super().mousePressEvent(event)  # ラバーバンド / Space+パンは Qt に委ねる
+        super().mousePressEvent(event)  # ラバーバンドの描画は Qt に委ねる
 
     def mouseMoveEvent(self, event) -> None:
         if self._panning and self._pan_origin is not None:
@@ -257,12 +242,12 @@ class ImageView(QGraphicsView):
                 if idx is not None:
                     self.instanceClicked.emit(idx, additive)
                 return
-            # ドラッグ扱い: 矩形に触れたインスタンスをまとめて選択
+            # ドラッグ扱い: 矩形に触れたインスタンスを選択へ追加(常に加算)
             rect = QRectF(
                 self.mapToScene(press_pos), self.mapToScene(event.pos())
             ).normalized()
             super().mouseReleaseEvent(event)
-            self.rectSelected.emit(self._instances_in_rect(rect), additive)
+            self.rectSelected.emit(self._instances_in_rect(rect))
             return
 
         super().mouseReleaseEvent(event)

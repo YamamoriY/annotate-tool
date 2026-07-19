@@ -83,7 +83,7 @@ class ViewerWindow(QMainWindow):
     def _connect_signals(self) -> None:
         # ユーザー操作 -> 状態
         self.view.instanceClicked.connect(self._on_instance_clicked)
-        self.view.rectSelected.connect(self.state.set_selection)
+        self.view.rectSelected.connect(self._on_rect_selected)
         self.panel.selectionChanged.connect(self._on_panel_selection)
         self.deselect_btn.clicked.connect(self.state.deselect)
 
@@ -129,6 +129,10 @@ class ViewerWindow(QMainWindow):
             self.state.toggle(index)
         else:
             self.state.select(index)
+
+    def _on_rect_selected(self, indices) -> None:
+        # 矩形選択は常に現在の選択へ追加する
+        self.state.set_selection(indices, additive=True)
 
     def _on_panel_selection(self, rows) -> None:
         self.state.set_selection(rows)

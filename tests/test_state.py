@@ -17,9 +17,18 @@ from annotate_tool.state import ViewerState
 class StubDataset:
     images: list[ImageEntry] = field(default_factory=list)
     anns: dict[int, list[Annotation]] = field(default_factory=dict)
+    saved: bool = False
 
     def annotations_for(self, image_id: int) -> list[Annotation]:
         return self.anns.get(image_id, [])
+
+    def delete_annotations(self, annotations: list[Annotation]) -> None:
+        targets = {id(a) for a in annotations}
+        for image_id, lst in self.anns.items():
+            self.anns[image_id] = [a for a in lst if id(a) not in targets]
+
+    def save(self) -> None:
+        self.saved = True
 
 
 def make_ann(ann_id: int, image_id: int) -> Annotation:
@@ -120,6 +129,35 @@ def test_selection_ignores_out_of_range(dataset: StubDataset):
 
     state.toggle(99)  # 範囲外は無視(変化なし)
     assert state.selected_indices == (0,)
+
+
+def test_delete_selected_removes_saves_and_clears(dataset: StubDataset):
+    state = ViewerState(dataset)
+    ann_changes: list[bool] = []
+    selections: list[tuple[int, ...]] = []
+    state.annotationsChanged.connect(lambda: ann_changes.append(True))
+    state.selectionChanged.connect(selections.append)
+
+    state.set_selection([0])  # 現在画像の先頭(ann id 10)を選択
+    state.delete_selected()
+
+    assert [a.id for a in state.current_annotations()] == [11]
+    assert state.selected_indices == ()
+    assert dataset.saved is True
+    assert ann_changes == [True]
+    assert selections[-1] == ()  # 削除後に選択解除が通知される
+
+
+def test_delete_selected_noop_when_empty(dataset: StubDataset):
+    state = ViewerState(dataset)
+    ann_changes: list[bool] = []
+    state.annotationsChanged.connect(lambda: ann_changes.append(True))
+
+    state.delete_selected()  # 選択なし
+
+    assert ann_changes == []
+    assert dataset.saved is False
+    assert [a.id for a in state.current_annotations()] == [10, 11]
 
 
 def test_toggles(dataset: StubDataset):

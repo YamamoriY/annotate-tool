@@ -28,6 +28,7 @@ uv run annotate-tool [path/to/instances.json]
 | インスタンス選択 | ポリゴンをクリック、または左の一覧をクリック |
 | 複数選択(追加 / 解除) | Shift + クリック |
 | 矩形選択 | 左ドラッグ(矩形に触れたインスタンスを選択へ追加) |
+| 選択インスタンスを削除 | Delete(または上部の「削除」ボタン) |
 
 ## 構成
 
@@ -41,7 +42,7 @@ src/annotate_tool/
     ├── main_window.py     # 組み立てと配線のみ(composition root)
     ├── image_view.py      # 画像 + ポリゴン描画ビュー
     ├── instance_panel.py  # インスタンス一覧ドック
-    └── deselect_button.py # 浮動「選択解除」ボタン
+    └── action_bar.py      # 浮動アクションバー(選択解除 / 削除)
 ```
 
 設計方針:

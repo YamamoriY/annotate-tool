@@ -75,6 +75,30 @@ def test_category_name_fallback(coco_json: Path):
     assert ds.category_name(42) == "42"  # 未知 id は文字列化して返す
 
 
+def test_delete_annotations_updates_index(coco_json: Path):
+    ds = CocoDataset(coco_json)
+    ann10 = ds.annotations_for(1)[0]
+    ds.delete_annotations([ann10])
+    assert [a.id for a in ds.annotations] == [11, 12]
+    assert [a.id for a in ds.annotations_for(1)] == [11]
+
+
+def test_save_persists_deletion_and_preserves_fields(coco_json: Path):
+    ds = CocoDataset(coco_json)
+    ds.delete_annotations([ds.annotations_for(1)[0]])  # id 10 を削除
+    ds.save()
+
+    reloaded = json.loads(coco_json.read_text(encoding="utf-8"))
+    assert [a["id"] for a in reloaded["annotations"]] == [11, 12]
+    # 削除に関係しないフィールドは保持される
+    assert reloaded["info"] == {"description": "test"}
+    assert reloaded["images"][0]["file_name"] == "a.jpg"
+
+    # 再読み込みしても整合していること
+    ds2 = CocoDataset(coco_json)
+    assert [a.id for a in ds2.annotations] == [11, 12]
+
+
 def test_annotation_polygons():
     ann = Annotation(
         id=1,

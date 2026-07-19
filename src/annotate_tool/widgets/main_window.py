@@ -13,13 +13,19 @@
 from __future__ import annotations
 
 from PySide6.QtGui import QAction, QKeySequence, QPixmap
-from PySide6.QtWidgets import QLabel, QMainWindow, QStatusBar, QToolBar
+from PySide6.QtWidgets import (
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QStatusBar,
+    QToolBar,
+)
 from PySide6.QtCore import Qt
 
 from annotate_tool import style
 from annotate_tool.coco_data import CocoDataset
 from annotate_tool.state import ViewerState
-from annotate_tool.widgets.deselect_button import DeselectButton
+from annotate_tool.widgets.action_bar import FloatingActionBar
 from annotate_tool.widgets.image_view import ImageView
 from annotate_tool.widgets.instance_panel import InstancePanel
 
@@ -34,7 +40,7 @@ class ViewerWindow(QMainWindow):
 
         self.view = ImageView(self)
         self.setCentralWidget(self.view)
-        self.deselect_btn = DeselectButton(self.view)
+        self.action_bar = FloatingActionBar(self.view)
 
         self.panel = InstancePanel(self)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.panel)
@@ -68,6 +74,7 @@ class ViewerWindow(QMainWindow):
         self.act_overlay = make("オーバーレイ (V)", ["V"], self.state.toggle_overlay)
         self.act_fill = make("塗り (B)", ["B"], self.state.toggle_fill)
         self.act_deselect = make("選択解除", ["Esc"], self.state.deselect)
+        self.act_delete = make("削除", ["Delete"], self._delete_selected)
 
     def _build_toolbar(self) -> None:
         tb = QToolBar("Navigation", self)
@@ -85,11 +92,13 @@ class ViewerWindow(QMainWindow):
         self.view.instanceClicked.connect(self._on_instance_clicked)
         self.view.rectSelected.connect(self._on_rect_selected)
         self.panel.selectionChanged.connect(self._on_panel_selection)
-        self.deselect_btn.clicked.connect(self.state.deselect)
+        self.action_bar.deselectClicked.connect(self.state.deselect)
+        self.action_bar.deleteClicked.connect(self._delete_selected)
 
         # 状態 -> 表示
         self.state.imageChanged.connect(self._load_image)
         self.state.selectionChanged.connect(self._apply_selection)
+        self.state.annotationsChanged.connect(self._refresh_overlays)
         self.state.overlayVisibleChanged.connect(self.view.set_overlay_visible)
         self.state.fillVisibleChanged.connect(self.view.set_fill_visible)
 
@@ -105,23 +114,30 @@ class ViewerWindow(QMainWindow):
             return
 
         self.view.set_image(pixmap)
+        self._refresh_overlays()
+        self.action_bar.set_active(False)
 
+    def _refresh_overlays(self) -> None:
+        """現在画像のオーバーレイと一覧・情報表示を作り直す(画像は再読込しない)。"""
+        dataset = self.state.dataset
+        image = self.state.current_image()
         annotations = self.state.current_annotations()
+
         self.view.set_overlays(annotations, show_fill=self.state.fill_visible)
         self.view.set_overlay_visible(self.state.overlay_visible)
         self.panel.set_annotations(annotations, dataset.category_name)
-        self.deselect_btn.set_active(False)
 
-        self._info_label.setText(
-            f"{image.file_name}   "
-            f"[{index + 1}/{len(dataset.images)}]   "
-            f"インスタンス数: {len(annotations)}"
-        )
+        if image is not None:
+            self._info_label.setText(
+                f"{image.file_name}   "
+                f"[{self.state.image_index + 1}/{len(dataset.images)}]   "
+                f"インスタンス数: {len(annotations)}"
+            )
 
     def _apply_selection(self, indices) -> None:
         self.view.set_selection(indices)
         self.panel.set_selection(indices)
-        self.deselect_btn.set_active(bool(indices))
+        self.action_bar.set_active(bool(indices))
 
     # --- ユーザー操作 -> 状態 -------------------------------------------------
     def _on_instance_clicked(self, index: int, additive: bool) -> None:
@@ -139,3 +155,18 @@ class ViewerWindow(QMainWindow):
         if len(rows) == 1:
             # 一覧から単一選択したときだけ、そのインスタンスへビューを寄せる
             self.view.center_on_instance(rows[0])
+
+    def _delete_selected(self) -> None:
+        count = len(self.state.selected_indices)
+        if count == 0:
+            return
+        # JSON へ上書き保存する破壊的操作なので確認する
+        reply = QMessageBox.question(
+            self,
+            "インスタンスの削除",
+            f"選択中の {count} 件のインスタンスを削除して保存します。よろしいですか?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self.state.delete_selected()

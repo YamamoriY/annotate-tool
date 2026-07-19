@@ -33,7 +33,9 @@ DOCK_MIN_WIDTH = 240
 FLOATING_BUTTON_TOP_MARGIN = 12
 COLOR_ICON_SIZE = 12
 
-# --- 浮動「選択解除」ボタン --------------------------------------------------
+# --- 浮動アクションバー(選択中に表示)--------------------------------------
+FLOATING_BUTTON_SPACING = 8  # バー内のボタン間隔
+
 DESELECT_BUTTON_QSS = """
 QPushButton {
     background-color: rgba(40, 40, 40, 200);
@@ -45,6 +47,19 @@ QPushButton {
 }
 QPushButton:hover { background-color: rgba(70, 70, 70, 220); }
 QPushButton:pressed { background-color: rgba(20, 20, 20, 230); }
+"""
+
+DELETE_BUTTON_QSS = """
+QPushButton {
+    background-color: rgba(150, 40, 40, 210);
+    color: white;
+    border: 1px solid rgba(255, 160, 160, 120);
+    border-radius: 14px;
+    padding: 6px 16px;
+    font-size: 13px;
+}
+QPushButton:hover { background-color: rgba(190, 55, 55, 230); }
+QPushButton:pressed { background-color: rgba(120, 25, 25, 240); }
 """
 
 

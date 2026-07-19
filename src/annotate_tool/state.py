@@ -23,6 +23,8 @@ class ViewerState(QObject):
     imageChanged = Signal(int)  # 現在画像の index(同じ画像の再読み込みでも発火)
     # 選択インスタンスの index 集合(ソート済み tuple)。非選択は空 tuple。
     selectionChanged = Signal(object)
+    # 現在画像のアノテーション集合が変化した(削除など。画像自体は再読込しない)
+    annotationsChanged = Signal()
     overlayVisibleChanged = Signal(bool)
     fillVisibleChanged = Signal(bool)
 
@@ -117,6 +119,23 @@ class ViewerState(QObject):
 
     def deselect(self) -> None:
         self._apply(set())
+
+    # --- 編集 ---------------------------------------------------------------
+    def delete_selected(self) -> None:
+        """選択中のインスタンスを削除し、JSON へ保存する。
+
+        削除後は選択を解除し、annotationsChanged(表示の作り直し)と
+        selectionChanged(選択解除)を通知する。選択が空なら何もしない。
+        """
+        current = self.current_annotations()
+        targets = [current[i] for i in sorted(self._selected) if self._valid(i)]
+        if not targets:
+            return
+        self._dataset.delete_annotations(targets)
+        self._dataset.save()
+        self._selected = set()
+        self.annotationsChanged.emit()
+        self.selectionChanged.emit(())
 
     # --- 表示トグル -----------------------------------------------------------
     def toggle_overlay(self) -> None:

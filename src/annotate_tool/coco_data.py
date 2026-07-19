@@ -53,7 +53,9 @@ class CocoDataset:
         self.json_path = Path(json_path)
         self.data_dir = self.json_path.parent
 
+        # 保存時に元データの全フィールドを保つため、生の dict を保持しておく。
         raw = json.loads(self.json_path.read_text(encoding="utf-8"))
+        self._raw = raw
         self.info: dict = raw.get("info", {})
         self.licenses: list = raw.get("licenses", [])
 
@@ -96,6 +98,31 @@ class CocoDataset:
 
     def annotations_for(self, image_id: int) -> list[Annotation]:
         return self._by_image.get(image_id, [])
+
+    def delete_annotations(self, annotations: list[Annotation]) -> None:
+        """指定したアノテーション群を削除し、画像索引を張り直す。"""
+        targets = {id(ann) for ann in annotations}
+        if not targets:
+            return
+        self.annotations = [a for a in self.annotations if id(a) not in targets]
+        self._by_image = {}
+        for ann in self.annotations:
+            self._by_image.setdefault(ann.image_id, []).append(ann)
+
+    def save(self) -> None:
+        """現在のアノテーション集合を元の JSON へ上書き保存する。
+
+        元データの全フィールドを保つため、生の dict から削除済みアノテーションだけを
+        取り除いて書き戻す(id は COCO 内で一意である前提)。
+        """
+        surviving = {ann.id for ann in self.annotations}
+        self._raw["annotations"] = [
+            a for a in self._raw.get("annotations", []) if a.get("id") in surviving
+        ]
+        self.json_path.write_text(
+            json.dumps(self._raw, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     def image_path(self, image: ImageEntry) -> Path:
         return self.data_dir / image.file_name

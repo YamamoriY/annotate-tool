@@ -7,7 +7,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from collections.abc import Iterable
+
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QGraphicsPixmapItem,
@@ -22,9 +24,15 @@ from annotate_tool.coco_data import Annotation
 
 
 class ImageView(QGraphicsView):
-    """ホイールでズーム、ドラッグでパンできる画像表示ビュー。"""
+    """ホイールでズーム、矩形ドラッグで複数選択できる画像表示ビュー。
 
-    instanceClicked = Signal(int)  # ポリゴンをクリックした際にそのインスタンス番号を通知
+    パンは中ボタンドラッグ、または Space を押しながらの左ドラッグで行う。
+    """
+
+    # 単一クリック: (インスタンス番号, additive=Shift)
+    instanceClicked = Signal(int, bool)
+    # 矩形選択: (触れたインスタンス番号のリスト, additive=Shift)
+    rectSelected = Signal(object, bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -32,23 +40,32 @@ class ImageView(QGraphicsView):
         self.setScene(self._scene)
 
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
-        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        # 左ドラッグは矩形選択(ラバーバンド)。パンは中ボタン / Space+左ドラッグ。
+        self.setDragMode(QGraphicsView.RubberBandDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
         self.setBackgroundBrush(QBrush(style.VIEW_BACKGROUND))
+        # Space によるパン切り替えのためキーイベントを受け取れるようにする
+        self.setFocusPolicy(Qt.StrongFocus)
 
         self._pixmap_item: QGraphicsPixmapItem | None = None
         self._dim_item: QGraphicsRectItem | None = None
         # インスタンス番号 -> そのインスタンスを構成するポリゴンアイテム群
         self._items_by_index: list[list[QGraphicsPolygonItem]] = []
         self._show_fill = True
-        self._selected = -1
+        self._selected: set[int] = set()
+
+        # 操作状態
+        self._space_held = False  # Space 押下中は左ドラッグでパン
+        self._press_pos: QPoint | None = None  # 左押下位置(クリック/ドラッグ判定用)
+        self._panning = False  # 中ボタンによるパン中か
+        self._pan_origin: QPoint | None = None  # パン開始時のマウス位置
 
     # --- シーン構築 ---------------------------------------------------------
     def set_image(self, pixmap: QPixmap) -> None:
         self._scene.clear()
         self._items_by_index = []
-        self._selected = -1
+        self._selected = set()
         self._pixmap_item = self._scene.addPixmap(pixmap)
         self._scene.setSceneRect(self._pixmap_item.boundingRect())
 
@@ -71,7 +88,7 @@ class ImageView(QGraphicsView):
                 self._scene.removeItem(item)
         self._items_by_index = []
         self._show_fill = show_fill
-        self._selected = -1
+        self._selected = set()
         if self._dim_item is not None:
             self._dim_item.setVisible(False)
 
@@ -107,19 +124,23 @@ class ImageView(QGraphicsView):
         return QBrush(fill)
 
     # --- 選択 / 強調 --------------------------------------------------------
-    def select_instance(self, index: int) -> None:
-        """指定インスタンスを強調表示する。-1 で解除。"""
-        if index == self._selected:
+    def set_selection(self, indices: Iterable[int]) -> None:
+        """指定インスタンス群を強調表示する。空で解除。"""
+        new = {i for i in indices if 0 <= i < len(self._items_by_index)}
+        if new == self._selected:
             return
 
-        # 直前の選択を通常表示へ戻す
-        self._restyle(self._selected, selected=False)
-        self._selected = index
-        self._restyle(index, selected=True, raise_z=True)
+        # 直前の選択のうち外れたものを通常表示へ戻す
+        for idx in self._selected - new:
+            self._restyle(idx, selected=False)
+        # 新たに選択されたものを強調
+        for idx in new - self._selected:
+            self._restyle(idx, selected=True, raise_z=True)
+        self._selected = new
 
         # 選択中は非選択部へ暗幕をかける(選択インスタンスは暗幕の上に出る)
         if self._dim_item is not None:
-            self._dim_item.setVisible(index >= 0)
+            self._dim_item.setVisible(bool(new))
 
     def center_on_instance(self, index: int) -> None:
         """指定インスタンスの位置へビューを寄せる。"""
@@ -153,7 +174,7 @@ class ImageView(QGraphicsView):
         self._show_fill = visible
         for idx, items in enumerate(self._items_by_index):
             color = style.instance_color(idx)
-            selected = idx == self._selected
+            selected = idx in self._selected
             for item in items:
                 item.setBrush(self._make_brush(color, selected))
 
@@ -166,13 +187,92 @@ class ImageView(QGraphicsView):
         factor = style.ZOOM_STEP if event.angleDelta().y() > 0 else 1 / style.ZOOM_STEP
         self.scale(factor, factor)
 
+    # --- パン(中ボタン / Space+左ドラッグ)------------------------------------
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            self._space_held = True
+            self.setDragMode(QGraphicsView.ScrollHandDrag)
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event) -> None:
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            self._space_held = False
+            self.setDragMode(QGraphicsView.RubberBandDrag)
+        super().keyReleaseEvent(event)
+
+    def _pan_by(self, delta: QPoint) -> None:
+        h, v = self.horizontalScrollBar(), self.verticalScrollBar()
+        h.setValue(h.value() - delta.x())
+        v.setValue(v.value() - delta.y())
+
+    # --- クリック / 矩形選択 --------------------------------------------------
+    def _instance_at(self, pos: QPoint) -> int | None:
+        """ビュー座標 pos の最前面ポリゴンのインスタンス番号(暗幕は無視)。"""
+        for item in self.items(pos):
+            if isinstance(item, QGraphicsPolygonItem):
+                idx = item.data(0)
+                if idx is not None:
+                    return int(idx)
+        return None
+
     def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.LeftButton:
-            # 暗幕を無視し、最前面のポリゴンを拾う
-            for item in self.items(event.pos()):
-                if isinstance(item, QGraphicsPolygonItem):
-                    idx = item.data(0)
-                    if idx is not None:
-                        self.instanceClicked.emit(int(idx))
-                    break
-        super().mousePressEvent(event)  # パン操作は従来通り
+        if event.button() == Qt.MiddleButton:
+            # 中ボタンドラッグでパン
+            self._panning = True
+            self._pan_origin = event.pos()
+            self.setCursor(Qt.ClosedHandCursor)
+            event.accept()
+            return
+        if event.button() == Qt.LeftButton and not self._space_held:
+            # クリックとドラッグ(矩形選択)を release 時に判別するため位置を記録
+            self._press_pos = event.pos()
+        super().mousePressEvent(event)  # ラバーバンド / Space+パンは Qt に委ねる
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._panning and self._pan_origin is not None:
+            delta = event.pos() - self._pan_origin
+            self._pan_origin = event.pos()
+            self._pan_by(delta)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MiddleButton and self._panning:
+            self._panning = False
+            self._pan_origin = None
+            self.unsetCursor()
+            event.accept()
+            return
+
+        if event.button() == Qt.LeftButton and self._press_pos is not None:
+            press_pos = self._press_pos
+            self._press_pos = None
+            additive = bool(event.modifiers() & Qt.ShiftModifier)
+            moved = (event.pos() - press_pos).manhattanLength()
+            if moved <= style.CLICK_DRAG_THRESHOLD:
+                # クリック扱い: 押下位置のポリゴンを選択
+                super().mouseReleaseEvent(event)
+                idx = self._instance_at(press_pos)
+                if idx is not None:
+                    self.instanceClicked.emit(idx, additive)
+                return
+            # ドラッグ扱い: 矩形に触れたインスタンスをまとめて選択
+            rect = QRectF(
+                self.mapToScene(press_pos), self.mapToScene(event.pos())
+            ).normalized()
+            super().mouseReleaseEvent(event)
+            self.rectSelected.emit(self._instances_in_rect(rect), additive)
+            return
+
+        super().mouseReleaseEvent(event)
+
+    def _instances_in_rect(self, scene_rect: QRectF) -> list[int]:
+        """矩形に触れた(交差した)インスタンス番号を重複なく返す。"""
+        found: set[int] = set()
+        for item in self._scene.items(scene_rect, Qt.IntersectsItemShape):
+            if isinstance(item, QGraphicsPolygonItem):
+                idx = item.data(0)
+                if idx is not None:
+                    found.add(int(idx))
+        return sorted(found)

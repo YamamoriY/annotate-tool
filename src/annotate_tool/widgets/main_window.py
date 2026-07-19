@@ -82,7 +82,8 @@ class ViewerWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         # ユーザー操作 -> 状態
-        self.view.instanceClicked.connect(self.state.select)
+        self.view.instanceClicked.connect(self._on_instance_clicked)
+        self.view.rectSelected.connect(self.state.set_selection)
         self.panel.selectionChanged.connect(self._on_panel_selection)
         self.deselect_btn.clicked.connect(self.state.deselect)
 
@@ -117,14 +118,20 @@ class ViewerWindow(QMainWindow):
             f"インスタンス数: {len(annotations)}"
         )
 
-    def _apply_selection(self, index: int) -> None:
-        self.view.select_instance(index)
-        self.panel.set_selected(index)
-        self.deselect_btn.set_active(index >= 0)
+    def _apply_selection(self, indices) -> None:
+        self.view.set_selection(indices)
+        self.panel.set_selection(indices)
+        self.deselect_btn.set_active(bool(indices))
 
     # --- ユーザー操作 -> 状態 -------------------------------------------------
-    def _on_panel_selection(self, row: int) -> None:
-        self.state.select(row)
-        if row >= 0:
-            # 一覧から選んだときだけ、そのインスタンスへビューを寄せる
-            self.view.center_on_instance(row)
+    def _on_instance_clicked(self, index: int, additive: bool) -> None:
+        if additive:
+            self.state.toggle(index)
+        else:
+            self.state.select(index)
+
+    def _on_panel_selection(self, rows) -> None:
+        self.state.set_selection(rows)
+        if len(rows) == 1:
+            # 一覧から単一選択したときだけ、そのインスタンスへビューを寄せる
+            self.view.center_on_instance(rows[0])

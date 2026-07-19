@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from PySide6.QtCore import QObject, Signal
 
 from annotate_tool.coco_data import Annotation, CocoDataset, ImageEntry
@@ -19,7 +21,8 @@ class ViewerState(QObject):
     """ビューアの状態と、それを変更する操作(コマンド)を提供する。"""
 
     imageChanged = Signal(int)  # 現在画像の index(同じ画像の再読み込みでも発火)
-    selectionChanged = Signal(int)  # 選択インスタンスの index、-1 は非選択
+    # 選択インスタンスの index 集合(ソート済み tuple)。非選択は空 tuple。
+    selectionChanged = Signal(object)
     overlayVisibleChanged = Signal(bool)
     fillVisibleChanged = Signal(bool)
 
@@ -27,7 +30,7 @@ class ViewerState(QObject):
         super().__init__(parent)
         self._dataset = dataset
         self._image_index = 0
-        self._selected = -1
+        self._selected: set[int] = set()
         self._overlay_visible = True
         self._fill_visible = True
 
@@ -41,8 +44,11 @@ class ViewerState(QObject):
         return self._image_index
 
     @property
-    def selected_index(self) -> int:
-        return self._selected
+    def selected_indices(self) -> tuple[int, ...]:
+        return tuple(sorted(self._selected))
+
+    def is_selected(self, index: int) -> bool:
+        return index in self._selected
 
     @property
     def overlay_visible(self) -> bool:
@@ -69,11 +75,11 @@ class ViewerState(QObject):
         if not self._dataset.images:
             return
         self._image_index = index % len(self._dataset.images)
-        had_selection = self._selected >= 0
-        self._selected = -1
+        had_selection = bool(self._selected)
+        self._selected = set()
         self.imageChanged.emit(self._image_index)
         if had_selection:
-            self.selectionChanged.emit(-1)
+            self.selectionChanged.emit(())
 
     def next_image(self) -> None:
         self.set_image_index(self._image_index + 1)
@@ -82,17 +88,35 @@ class ViewerState(QObject):
         self.set_image_index(self._image_index - 1)
 
     # --- 選択 ---------------------------------------------------------------
-    def select(self, index: int) -> None:
-        """インスタンスを選択する。-1 で選択解除。範囲外は解除扱い。"""
-        if not (0 <= index < len(self.current_annotations())):
-            index = -1
-        if index == self._selected:
+    def _valid(self, index: int) -> bool:
+        return 0 <= index < len(self.current_annotations())
+
+    def _apply(self, selection: set[int]) -> None:
+        """選択集合を差し替え、変化があればシグナルを出す。"""
+        if selection == self._selected:
             return
-        self._selected = index
-        self.selectionChanged.emit(index)
+        self._selected = selection
+        self.selectionChanged.emit(tuple(sorted(selection)))
+
+    def select(self, index: int) -> None:
+        """その1件だけを選択(置換)。範囲外/-1 は全解除。"""
+        self._apply({index} if self._valid(index) else set())
+
+    def toggle(self, index: int) -> None:
+        """指定インスタンスを選択に追加、既に選択済みなら解除する。"""
+        if not self._valid(index):
+            return
+        selection = set(self._selected)
+        selection.discard(index) if index in selection else selection.add(index)
+        self._apply(selection)
+
+    def set_selection(self, indices: Iterable[int], additive: bool = False) -> None:
+        """複数インスタンスを選択する。additive=False は置換、True は和集合。"""
+        chosen = {i for i in indices if self._valid(i)}
+        self._apply((self._selected | chosen) if additive else chosen)
 
     def deselect(self) -> None:
-        self.select(-1)
+        self._apply(set())
 
     # --- 表示トグル -----------------------------------------------------------
     def toggle_overlay(self) -> None:

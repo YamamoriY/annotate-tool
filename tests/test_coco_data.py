@@ -99,6 +99,32 @@ def test_save_persists_deletion_and_preserves_fields(coco_json: Path):
     assert [a.id for a in ds2.annotations] == [11, 12]
 
 
+def test_add_annotation_computes_geometry_and_id(coco_json: Path):
+    ds = CocoDataset(coco_json)
+    # 10x10 の四角形を追加(既存 id は 10..12 なので新 id は 13)
+    ann = ds.add_annotation(1, [[0, 0, 10, 0, 10, 10, 0, 10]])
+    assert ann.id == 13
+    assert ann.category_id == 1  # 既定カテゴリ(最小 id)
+    assert ann.bbox == [0, 0, 10, 10]
+    assert ann.area == 100.0
+    assert [a.id for a in ds.annotations_for(1)] == [10, 11, 13]
+
+
+def test_add_annotation_persists_on_save(coco_json: Path):
+    ds = CocoDataset(coco_json)
+    ds.add_annotation(2, [[0, 0, 4, 0, 4, 4, 0, 4]])
+    ds.save()
+
+    reloaded = json.loads(coco_json.read_text(encoding="utf-8"))
+    ids = [a["id"] for a in reloaded["annotations"]]
+    assert 13 in ids  # 追加分が保存されている
+
+    ds2 = CocoDataset(coco_json)
+    new_ann = next(a for a in ds2.annotations if a.id == 13)
+    assert new_ann.image_id == 2
+    assert new_ann.area == 16.0
+
+
 def test_annotation_polygons():
     ann = Annotation(
         id=1,

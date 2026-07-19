@@ -25,6 +25,7 @@ from annotate_tool import style
 from annotate_tool.coco_data import CocoDataset
 from annotate_tool.state import ViewerState
 from annotate_tool.widgets.action_bar import FloatingActionBar
+from annotate_tool.widgets.add_bar import AddBar
 from annotate_tool.widgets.control_group import ControlGroup
 from annotate_tool.widgets.image_view import ImageView
 from annotate_tool.widgets.instance_panel import InstancePanel
@@ -36,6 +37,7 @@ class ViewerWindow(QMainWindow):
         super().__init__()
         self.state = ViewerState(dataset, self)
         self._did_initial_fit = False
+        self._painting_started = False  # 追加モードで塗り始めたか(上部ボタン制御用)
 
         self.setWindowTitle("COCO Segmentation Viewer")
         self.resize(*style.WINDOW_SIZE)
@@ -43,6 +45,7 @@ class ViewerWindow(QMainWindow):
         self.view = ImageView(self)
         self.setCentralWidget(self.view)
         self.action_bar = FloatingActionBar(self.view)
+        self.add_bar = AddBar(self.view)
 
         self.panel = InstancePanel(self)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.panel)
@@ -64,6 +67,8 @@ class ViewerWindow(QMainWindow):
             self._load_image(self.state.image_index)
         else:
             self.statusBar().showMessage("画像がありません")
+
+        self._update_top_bar()  # 起動時は「追加」を表示
 
     def showEvent(self, event) -> None:
         # 初回表示までビューポートは最終サイズにならないため、表示後に一度フィットする
@@ -88,7 +93,8 @@ class ViewerWindow(QMainWindow):
         make("フィット", ["F"], self.view.fit)
         make("オーバーレイ", ["V"], self.state.toggle_overlay)
         make("塗り", ["B"], self.state.toggle_fill)
-        make("選択解除", ["Esc"], self.state.deselect)
+        make("選択解除 / 追加取消", ["Esc"], self._on_escape)
+        make("確定", ["Return", "Enter"], self._confirm_add)
         make("削除", ["Delete"], self._delete_selected)
 
     def _build_side_controls(self) -> None:
@@ -113,9 +119,12 @@ class ViewerWindow(QMainWindow):
         # ユーザー操作 -> 状態
         self.view.instanceClicked.connect(self._on_instance_clicked)
         self.view.rectSelected.connect(self._on_rect_selected)
+        self.view.paintStarted.connect(self._on_paint_started)
         self.panel.selectionChanged.connect(self._on_panel_selection)
         self.action_bar.deselectClicked.connect(self.state.deselect)
         self.action_bar.deleteClicked.connect(self._delete_selected)
+        self.add_bar.addClicked.connect(self.state.enter_add_mode)
+        self.add_bar.confirmClicked.connect(self._confirm_add)
 
         # 状態 -> 表示
         self.state.imageChanged.connect(self._load_image)
@@ -123,6 +132,7 @@ class ViewerWindow(QMainWindow):
         self.state.annotationsChanged.connect(self._refresh_overlays)
         self.state.overlayVisibleChanged.connect(self.view.set_overlay_visible)
         self.state.fillVisibleChanged.connect(self.view.set_fill_visible)
+        self.state.addModeChanged.connect(self._on_add_mode_changed)
         # トグルボタンの見た目を状態に追従させる(ショートカット操作でも更新される)
         self.state.overlayVisibleChanged.connect(self._overlay_btn.setChecked)
         self.state.fillVisibleChanged.connect(self._fill_btn.setChecked)
@@ -163,6 +173,53 @@ class ViewerWindow(QMainWindow):
         self.view.set_selection(indices)
         self.panel.set_selection(indices)
         self.action_bar.set_active(bool(indices))
+        self._update_top_bar()
+
+    # --- 追加(塗りつぶし)モード --------------------------------------------
+    def _on_add_mode_changed(self, active: bool) -> None:
+        self.view.set_add_mode(active)
+        # 追加中は一覧・サイドパネルの操作(選択・画像送り)を止める
+        self.panel.setEnabled(not active)
+        self.side_panel.setEnabled(not active)
+        if active:
+            self._painting_started = False
+        self._update_top_bar()
+
+    def _on_paint_started(self) -> None:
+        self._painting_started = True
+        self._update_top_bar()  # 塗り始めたら「確定」を出す
+
+    def _confirm_add(self) -> None:
+        """塗った領域を新規インスタンスとして確定する(追加モード時のみ)。"""
+        if not self.state.add_mode:
+            return
+        polygons = self.view.painted_polygons()
+        if polygons:
+            self.state.add_painted(polygons)
+        self.state.cancel_add_mode()
+
+    def _on_escape(self) -> None:
+        # 追加モード中は塗りを破棄して抜ける。通常時は選択解除。
+        if self.state.add_mode:
+            self.state.cancel_add_mode()
+        else:
+            self.state.deselect()
+
+    def _update_top_bar(self) -> None:
+        """上部ボタン(追加 / 確定)の表示を状態から決める。
+
+        - 追加モード中: 塗り始めたら「確定」、まだなら何も出さない。
+        - 通常時: 未選択なら「追加」、選択中(範囲選択含む)は「追加」を隠す。
+        """
+        if self.state.add_mode:
+            if self._painting_started:
+                self.add_bar.show_confirm()
+            else:
+                self.add_bar.hide_all()
+        elif self.state.selected_indices:
+            self.add_bar.hide_all()
+        else:
+            self.add_bar.show_add()
 
     # --- ユーザー操作 -> 状態 -------------------------------------------------
     def _on_instance_clicked(self, index: int, additive: bool) -> None:

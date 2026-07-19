@@ -18,6 +18,7 @@ class StubDataset:
     images: list[ImageEntry] = field(default_factory=list)
     anns: dict[int, list[Annotation]] = field(default_factory=dict)
     saved: bool = False
+    added: list[Annotation] = field(default_factory=list)
 
     def annotations_for(self, image_id: int) -> list[Annotation]:
         return self.anns.get(image_id, [])
@@ -26,6 +27,22 @@ class StubDataset:
         targets = {id(a) for a in annotations}
         for image_id, lst in self.anns.items():
             self.anns[image_id] = [a for a in lst if id(a) not in targets]
+
+    def add_annotation(
+        self,
+        image_id: int,
+        segmentation: list[list[float]],
+        category_id: int | None = None,
+    ) -> Annotation:
+        ann = Annotation(
+            id=100 + len(self.added),
+            image_id=image_id,
+            category_id=category_id or 1,
+            segmentation=segmentation,
+        )
+        self.anns.setdefault(image_id, []).append(ann)
+        self.added.append(ann)
+        return ann
 
     def save(self) -> None:
         self.saved = True
@@ -183,3 +200,53 @@ def test_empty_dataset_is_safe():
     state.next_image()  # 何も起きない(例外にならない)
     state.select(0)
     assert state.selected_indices == ()
+
+
+# --- 追加(塗りつぶし)モード -----------------------------------------------
+def test_enter_and_cancel_add_mode(dataset: StubDataset):
+    state = ViewerState(dataset)
+    changes: list[bool] = []
+    state.addModeChanged.connect(changes.append)
+
+    assert state.add_mode is False
+    state.enter_add_mode()
+    assert state.add_mode is True
+    state.enter_add_mode()  # 二重呼び出しは無視される
+    state.cancel_add_mode()
+    assert state.add_mode is False
+    state.cancel_add_mode()  # 二重呼び出しは無視される
+    assert changes == [True, False]
+
+
+def test_enter_add_mode_clears_selection(dataset: StubDataset):
+    state = ViewerState(dataset)
+    selections: list[tuple] = []
+    state.selectionChanged.connect(selections.append)
+
+    state.set_selection([0, 1])
+    assert state.selected_indices == (0, 1)
+    state.enter_add_mode()
+    assert state.selected_indices == ()
+    assert selections[-1] == ()  # 選択解除が通知される
+
+
+def test_add_painted_adds_annotation_and_saves(dataset: StubDataset):
+    state = ViewerState(dataset)
+    refreshed: list[int] = []
+    state.annotationsChanged.connect(lambda: refreshed.append(1))
+
+    polygons = [[0, 0, 10, 0, 10, 10, 0, 10]]
+    ok = state.add_painted(polygons)
+    assert ok is True
+    assert dataset.saved is True
+    assert len(dataset.added) == 1
+    assert dataset.added[0].image_id == 1
+    assert dataset.added[0].segmentation == polygons
+    assert refreshed == [1]
+
+
+def test_add_painted_ignores_empty(dataset: StubDataset):
+    state = ViewerState(dataset)
+    assert state.add_painted([]) is False
+    assert dataset.saved is False
+    assert dataset.added == []

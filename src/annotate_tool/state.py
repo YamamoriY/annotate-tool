@@ -27,6 +27,7 @@ class ViewerState(QObject):
     annotationsChanged = Signal()
     overlayVisibleChanged = Signal(bool)
     fillVisibleChanged = Signal(bool)
+    addModeChanged = Signal(bool)  # 追加(塗りつぶし)モードの ON/OFF
 
     def __init__(self, dataset: CocoDataset, parent: QObject | None = None):
         super().__init__(parent)
@@ -35,6 +36,7 @@ class ViewerState(QObject):
         self._selected: set[int] = set()
         self._overlay_visible = True
         self._fill_visible = True
+        self._add_mode = False
 
     # --- 参照系 -------------------------------------------------------------
     @property
@@ -59,6 +61,10 @@ class ViewerState(QObject):
     @property
     def fill_visible(self) -> bool:
         return self._fill_visible
+
+    @property
+    def add_mode(self) -> bool:
+        return self._add_mode
 
     def current_image(self) -> ImageEntry | None:
         if not self._dataset.images:
@@ -119,6 +125,35 @@ class ViewerState(QObject):
 
     def deselect(self) -> None:
         self._apply(set())
+
+    # --- 追加(塗りつぶし)モード --------------------------------------------
+    def enter_add_mode(self) -> None:
+        """新規インスタンスを塗って追加するモードへ入る(選択は解除される)。"""
+        if self._add_mode:
+            return
+        self._add_mode = True
+        self._apply(set())  # 選択があれば解除(selectionChanged を出す)
+        self.addModeChanged.emit(True)
+
+    def cancel_add_mode(self) -> None:
+        """追加モードを抜ける(塗った内容の確定/破棄は呼び出し側の責務)。"""
+        if not self._add_mode:
+            return
+        self._add_mode = False
+        self.addModeChanged.emit(False)
+
+    def add_painted(self, polygons: list[list[float]]) -> bool:
+        """塗ってできたポリゴン列を新規アノテーションとして追加し保存する。
+
+        追加できたら True。現在画像がない/ポリゴンが空なら何もせず False。
+        """
+        image = self.current_image()
+        if image is None or not polygons:
+            return False
+        self._dataset.add_annotation(image.id, polygons)
+        self._dataset.save()
+        self.annotationsChanged.emit()
+        return True
 
     # --- 編集 ---------------------------------------------------------------
     def delete_selected(self) -> None:

@@ -7,11 +7,21 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QPolygonF,
+)
 from PySide6.QtWidgets import (
+    QGraphicsPathItem,
     QGraphicsPixmapItem,
     QGraphicsPolygonItem,
     QGraphicsRectItem,
@@ -33,6 +43,8 @@ class ImageView(QGraphicsView):
     instanceClicked = Signal(int, bool)
     # 矩形選択: 触れたインスタンス番号のリスト(常に選択へ追加)
     rectSelected = Signal(object)
+    # 追加モードで塗り始めた(最初の一筆)
+    paintStarted = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -57,6 +69,15 @@ class ImageView(QGraphicsView):
         self._press_pos: QPoint | None = None  # 左押下位置(クリック/ドラッグ判定用)
         self._panning = False  # 中ボタンによるパン中か
         self._pan_origin: QPoint | None = None  # パン開始時のマウス位置
+
+        # 追加(塗りつぶし)モード
+        self._add_mode = False
+        self._painting = False  # 左ボタンで塗っている最中か
+        self._paint_started = False  # このモードで一度でも塗ったか
+        self._paint_path: QPainterPath | None = None
+        self._paint_item: QGraphicsPathItem | None = None
+        self._add_dim_item: QGraphicsRectItem | None = None
+        self._last_paint_pt: QPointF | None = None
 
     # --- シーン構築 ---------------------------------------------------------
     def set_image(self, pixmap: QPixmap) -> None:
@@ -184,6 +205,82 @@ class ImageView(QGraphicsView):
         factor = style.ZOOM_STEP if event.angleDelta().y() > 0 else 1 / style.ZOOM_STEP
         self.scale(factor, factor)
 
+    # --- 追加(塗りつぶし)モード --------------------------------------------
+    def set_add_mode(self, active: bool) -> None:
+        """塗りつぶしモードの ON/OFF。ON で全体に暗幕をかけブラシカーソルにする。"""
+        self._clear_paint()
+        self._add_mode = active
+        self._painting = False
+        self._paint_started = False
+        self._last_paint_pt = None
+
+        if active:
+            if self._pixmap_item is not None:
+                self._add_dim_item = self._scene.addRect(self._scene.sceneRect())
+                self._add_dim_item.setPen(QPen(Qt.NoPen))
+                self._add_dim_item.setBrush(
+                    QBrush(QColor(0, 0, 0, style.ADD_DIM_ALPHA))
+                )
+                self._add_dim_item.setZValue(style.Z_ADD_DIM)
+            self._paint_path = QPainterPath()
+            self._paint_path.setFillRule(Qt.WindingFill)
+            self._paint_item = self._scene.addPath(
+                self._paint_path, QPen(Qt.NoPen), QBrush(style.PAINT_COLOR)
+            )
+            self._paint_item.setZValue(style.Z_PAINT)
+            self.setDragMode(QGraphicsView.NoDrag)
+            self.setCursor(Qt.CrossCursor)
+        else:
+            self.setDragMode(QGraphicsView.RubberBandDrag)
+            self.unsetCursor()
+
+    def _clear_paint(self) -> None:
+        """塗り・暗幕アイテムをシーンから取り除く。"""
+        for attr in ("_paint_item", "_add_dim_item"):
+            item = getattr(self, attr)
+            if item is not None:
+                self._scene.removeItem(item)
+                setattr(self, attr, None)
+        self._paint_path = None
+
+    def _paint_to(self, scene_pt: QPointF) -> None:
+        """ブラシ半径の円を scene_pt へ置く。前回点から補間して隙間を埋める。"""
+        if self._paint_path is None:
+            return
+        r = style.BRUSH_RADIUS
+        last = self._last_paint_pt
+        if last is not None:
+            dist = math.hypot(scene_pt.x() - last.x(), scene_pt.y() - last.y())
+            steps = int(dist / (r * 0.5))
+            for i in range(1, steps + 1):
+                t = i / (steps + 1)
+                mid = QPointF(
+                    last.x() + (scene_pt.x() - last.x()) * t,
+                    last.y() + (scene_pt.y() - last.y()) * t,
+                )
+                self._paint_path.addEllipse(mid, r, r)
+        self._paint_path.addEllipse(scene_pt, r, r)
+        self._last_paint_pt = scene_pt
+        if self._paint_item is not None:
+            self._paint_item.setPath(self._paint_path)
+
+    def painted_polygons(self) -> list[list[float]]:
+        """塗った領域を COCO polygon 列(画像座標)へ変換して返す。空なら []。"""
+        if self._paint_path is None or self._paint_path.isEmpty():
+            return []
+        result: list[list[float]] = []
+        for poly in self._paint_path.simplified().toSubpathPolygons():
+            pts = [(p.x(), p.y()) for p in poly]
+            if len(pts) >= 2 and pts[0] == pts[-1]:
+                pts = pts[:-1]  # 末尾の始点複製を落とす
+            cleaned = _dedup_points(pts)
+            if len(cleaned) >= 3:
+                flat: list[float] = []
+                for x, y in cleaned:
+                    flat.extend((round(float(x), 2), round(float(y), 2)))
+                result.append(flat)
+        return result
+
     # --- パン(中ボタンドラッグ)----------------------------------------------
     def _pan_by(self, delta: QPoint) -> None:
         h, v = self.horizontalScrollBar(), self.verticalScrollBar()
@@ -202,10 +299,19 @@ class ImageView(QGraphicsView):
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MiddleButton:
-            # 中ボタンドラッグでパン
+            # 中ボタンドラッグでパン(追加モードでも使える)
             self._panning = True
             self._pan_origin = event.pos()
             self.setCursor(Qt.ClosedHandCursor)
+            event.accept()
+            return
+        if self._add_mode and event.button() == Qt.LeftButton:
+            # 追加モード: 左ドラッグで塗る(選択・矩形処理は行わない)
+            self._painting = True
+            self._paint_to(self.mapToScene(event.pos()))
+            if not self._paint_started:
+                self._paint_started = True
+                self.paintStarted.emit()
             event.accept()
             return
         if event.button() == Qt.LeftButton:
@@ -220,13 +326,25 @@ class ImageView(QGraphicsView):
             self._pan_by(delta)
             event.accept()
             return
+        if self._add_mode and self._painting:
+            self._paint_to(self.mapToScene(event.pos()))
+            event.accept()
+            return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.MiddleButton and self._panning:
             self._panning = False
             self._pan_origin = None
-            self.unsetCursor()
+            # 追加モード中はブラシカーソルへ戻す
+            self.setCursor(Qt.CrossCursor) if self._add_mode else self.unsetCursor()
+            event.accept()
+            return
+
+        if self._add_mode and event.button() == Qt.LeftButton:
+            # 一筆の終わり。塗った内容は保持し、次の筆も同じ領域へ足せる。
+            self._painting = False
+            self._last_paint_pt = None
             event.accept()
             return
 
@@ -261,3 +379,14 @@ class ImageView(QGraphicsView):
                 if idx is not None:
                     found.add(int(idx))
         return sorted(found)
+
+
+def _dedup_points(
+    pts: list[tuple[float, float]], min_dist: float = 1.0
+) -> list[tuple[float, float]]:
+    """連続する近接点(距離 < min_dist)を間引いて点数を減らす。"""
+    cleaned: list[tuple[float, float]] = []
+    for p in pts:
+        if not cleaned or math.hypot(p[0] - cleaned[-1][0], p[1] - cleaned[-1][1]) >= min_dist:
+            cleaned.append(p)
+    return cleaned

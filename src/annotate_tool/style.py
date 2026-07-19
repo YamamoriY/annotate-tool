@@ -21,6 +21,13 @@ DIM_ALPHA = 165  # 選択時に非選択部へかける暗幕の濃さ
 Z_DIM = 0.5
 Z_SELECTED = 1.0
 
+# --- 追加(塗りつぶし)モード -----------------------------------------------
+ADD_DIM_ALPHA = 130  # 追加モード中に全体へかける暗幕の濃さ
+BRUSH_RADIUS = 12.0  # 塗りブラシの半径(画像=シーン座標のピクセル)
+PAINT_COLOR = QColor(90, 220, 150, 150)  # 塗った領域の表示色(半透明)
+Z_ADD_DIM = 3.0  # 追加モードの暗幕(オーバーレイより上)
+Z_PAINT = 3.5  # 塗った領域(暗幕より上)
+
 # --- ビュー操作 -------------------------------------------------------------
 ZOOM_STEP = 1.25  # ホイール 1 ノッチあたりの拡大率
 VIEW_BACKGROUND = QColor(30, 30, 30)
@@ -103,6 +110,34 @@ QPushButton {
 }
 QPushButton:hover { background-color: rgba(190, 55, 55, 230); }
 QPushButton:pressed { background-color: rgba(120, 25, 25, 240); }
+"""
+
+# 「追加」ボタン(通常時に上部へ表示)。
+ADD_BUTTON_QSS = """
+QPushButton {
+    background-color: rgba(40, 40, 40, 200);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 90);
+    border-radius: 14px;
+    padding: 6px 18px;
+    font-size: 13px;
+}
+QPushButton:hover { background-color: rgba(70, 70, 70, 220); }
+QPushButton:pressed { background-color: rgba(20, 20, 20, 230); }
+"""
+
+# 「確定」ボタン(塗り始めたら上部へ表示)。
+CONFIRM_BUTTON_QSS = """
+QPushButton {
+    background-color: rgba(45, 140, 90, 220);
+    color: white;
+    border: 1px solid rgba(160, 240, 200, 140);
+    border-radius: 14px;
+    padding: 6px 18px;
+    font-size: 13px;
+}
+QPushButton:hover { background-color: rgba(55, 165, 105, 235); }
+QPushButton:pressed { background-color: rgba(35, 110, 70, 240); }
 """
 
 

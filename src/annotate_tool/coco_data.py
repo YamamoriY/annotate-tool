@@ -99,6 +99,56 @@ class CocoDataset:
     def annotations_for(self, image_id: int) -> list[Annotation]:
         return self._by_image.get(image_id, [])
 
+    def default_category_id(self) -> int:
+        """新規アノテーションに割り当てる既定カテゴリ(最小の category id)。"""
+        if self.categories:
+            return min(self.categories)
+        return 1
+
+    def _next_annotation_id(self) -> int:
+        """未使用のアノテーション id を返す(既存最大 + 1)。"""
+        ids = [a.id for a in self.annotations]
+        ids += [a.get("id", 0) for a in self._raw.get("annotations", [])]
+        return (max(ids) + 1) if ids else 1
+
+    def add_annotation(
+        self,
+        image_id: int,
+        segmentation: list[list[float]],
+        category_id: int | None = None,
+    ) -> Annotation:
+        """ポリゴン列から新しいアノテーションを作って登録する。
+
+        bbox / area は segmentation から算出する。id は自動採番。生の dict にも
+        追加するため、この後 save() すればそのまま JSON に書き出される。
+        """
+        if category_id is None:
+            category_id = self.default_category_id()
+        bbox = _bbox_of(segmentation)
+        area = _area_of(segmentation)
+        ann = Annotation(
+            id=self._next_annotation_id(),
+            image_id=image_id,
+            category_id=category_id,
+            segmentation=segmentation,
+            bbox=bbox,
+            area=area,
+        )
+        self.annotations.append(ann)
+        self._by_image.setdefault(image_id, []).append(ann)
+        self._raw.setdefault("annotations", []).append(
+            {
+                "id": ann.id,
+                "image_id": image_id,
+                "category_id": category_id,
+                "segmentation": segmentation,
+                "bbox": bbox,
+                "area": area,
+                "iscrowd": 0,
+            }
+        )
+        return ann
+
     def delete_annotations(self, annotations: list[Annotation]) -> None:
         """指定したアノテーション群を削除し、画像索引を張り直す。"""
         targets = {id(ann) for ann in annotations}
@@ -130,3 +180,32 @@ class CocoDataset:
     def category_name(self, category_id: int) -> str:
         cat = self.categories.get(category_id)
         return cat.name if cat else str(category_id)
+
+
+def _bbox_of(segmentation: list[list[float]]) -> list[float]:
+    """COCO polygon 列から外接矩形 [x, y, w, h] を求める。"""
+    xs: list[float] = []
+    ys: list[float] = []
+    for poly in segmentation:
+        xs += poly[0::2]
+        ys += poly[1::2]
+    if not xs:
+        return [0.0, 0.0, 0.0, 0.0]
+    x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
+    return [x0, y0, x1 - x0, y1 - y0]
+
+
+def _area_of(segmentation: list[list[float]]) -> float:
+    """polygon 列の面積を靴ひも公式で近似する(各ポリゴンの絶対面積の総和)。"""
+    total = 0.0
+    for poly in segmentation:
+        pts = [(poly[i], poly[i + 1]) for i in range(0, len(poly) - 1, 2)]
+        if len(pts) < 3:
+            continue
+        s = 0.0
+        for i in range(len(pts)):
+            x1, y1 = pts[i]
+            x2, y2 = pts[(i + 1) % len(pts)]
+            s += x1 * y2 - x2 * y1
+        total += abs(s) / 2.0
+    return total

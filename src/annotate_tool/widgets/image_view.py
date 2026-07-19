@@ -10,19 +10,20 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 
+import numpy as np
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
     QCursor,
+    QImage,
     QPainter,
-    QPainterPath,
     QPen,
     QPixmap,
     QPolygonF,
 )
 from PySide6.QtWidgets import (
-    QGraphicsPathItem,
+    QGraphicsItem,
     QGraphicsPixmapItem,
     QGraphicsPolygonItem,
     QGraphicsRectItem,
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
 
 from annotate_tool import style
 from annotate_tool.coco_data import Annotation
+from annotate_tool.mask_polygon import mask_to_polygons
 
 
 class ImageView(QGraphicsView):
@@ -71,12 +73,14 @@ class ImageView(QGraphicsView):
         self._panning = False  # 中ボタンによるパン中か
         self._pan_origin: QPoint | None = None  # パン開始時のマウス位置
 
-        # 追加(塗りつぶし)モード
+        # 追加(塗りつぶし)モード。塗りは QPainterPath ではなく画像サイズのラスタ
+        # マスク(_mask_image)へ焼き込む。塗るコストは筆の周辺だけに収まり、塗った
+        # 時間・回数に依存しない(確定時のポリゴン化は mask_polygon が一度だけ行う)。
         self._add_mode = False
         self._painting = False  # 左ボタンで塗っている最中か
         self._paint_started = False  # このモードで一度でも塗ったか
-        self._paint_path: QPainterPath | None = None
-        self._paint_item: QGraphicsPathItem | None = None
+        self._mask_image: QImage | None = None  # 塗りマスク(ARGB32・画像と同サイズ)
+        self._paint_item: _MaskItem | None = None  # マスクを表示するアイテム
         self._add_dim_item: QGraphicsRectItem | None = None
         self._last_paint_pt: QPointF | None = None
 
@@ -227,12 +231,15 @@ class ImageView(QGraphicsView):
                     QBrush(QColor(0, 0, 0, style.ADD_DIM_ALPHA))
                 )
                 self._add_dim_item.setZValue(style.Z_ADD_DIM)
-            self._paint_path = QPainterPath()
-            self._paint_path.setFillRule(Qt.WindingFill)
-            self._paint_item = self._scene.addPath(
-                self._paint_path, QPen(Qt.NoPen), QBrush(style.PAINT_COLOR)
-            )
-            self._paint_item.setZValue(style.Z_PAINT)
+
+                # 画像と同サイズの透明マスクを用意し、そこへ塗る。
+                self._mask_image = QImage(
+                    self._pixmap_item.pixmap().size(), QImage.Format_ARGB32
+                )
+                self._mask_image.fill(Qt.transparent)
+                self._paint_item = _MaskItem(self._mask_image)
+                self._paint_item.setZValue(style.Z_PAINT)
+                self._scene.addItem(self._paint_item)
             self.setDragMode(QGraphicsView.NoDrag)
             self._update_brush_cursor()
         else:
@@ -263,71 +270,81 @@ class ImageView(QGraphicsView):
         self.setCursor(QCursor(pm, int(center), int(center)))
 
     def _clear_paint(self) -> None:
-        """塗り・暗幕アイテムをシーンから取り除く。"""
+        """塗り・暗幕アイテムをシーンから取り除き、マスクを捨てる。"""
         for attr in ("_paint_item", "_add_dim_item"):
             item = getattr(self, attr)
             if item is not None:
                 self._scene.removeItem(item)
                 setattr(self, attr, None)
-        self._paint_path = None
+        self._mask_image = None
+        self._last_paint_pt = None
 
     def _paint_to(self, scene_pt: QPointF) -> None:
-        """ブラシ半径の円を scene_pt へ置く。前回点から補間して隙間を埋める。"""
-        if self._paint_path is None:
+        """ブラシ半径の円をマスクへ焼き込む。前回点から掃引して隙間を埋める。
+
+        コンポジションは Source(上書き)・アンチエイリアスなしで塗る。こうすると
+        重ね塗りしても塗った画素のアルファは一定に保たれ、縁のにじみがマスクを削って
+        穴を作ることがない。塗り直した部分だけを update() して再描画コストを抑える。
+        """
+        if self._mask_image is None:
             return
         r = style.BRUSH_RADIUS
         last = self._last_paint_pt
-        if last is not None:
-            dist = math.hypot(scene_pt.x() - last.x(), scene_pt.y() - last.y())
-            steps = int(dist / (r * 0.5))
-            for i in range(1, steps + 1):
-                t = i / (steps + 1)
-                mid = QPointF(
-                    last.x() + (scene_pt.x() - last.x()) * t,
-                    last.y() + (scene_pt.y() - last.y()) * t,
-                )
-                self._paint_path.addEllipse(mid, r, r)
-        self._paint_path.addEllipse(scene_pt, r, r)
+
+        painter = QPainter(self._mask_image)
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        if last is None:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(style.PAINT_COLOR))
+            painter.drawEllipse(scene_pt, r, r)
+        else:
+            # 前回点から今回点までを直径 2r の丸ペンで掃く(=円を連ねたのと同じ)
+            pen = QPen(style.PAINT_COLOR, 2.0 * r)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(pen)
+            painter.drawLine(last, scene_pt)
+        painter.end()
+
         self._last_paint_pt = scene_pt
         if self._paint_item is not None:
-            self._paint_item.setPath(self._paint_path)
+            self._paint_item.update(self._dirty_rect(last, scene_pt, r))
+
+    @staticmethod
+    def _dirty_rect(last: QPointF | None, cur: QPointF, r: float) -> QRectF:
+        """last→cur の掃引が触れた範囲(ブラシ半径ぶん広げた矩形)を返す。"""
+        pad = r + 2.0
+        x0, x1 = cur.x(), cur.x()
+        y0, y1 = cur.y(), cur.y()
+        if last is not None:
+            x0, x1 = min(x0, last.x()), max(x1, last.x())
+            y0, y1 = min(y0, last.y()), max(y1, last.y())
+        return QRectF(x0 - pad, y0 - pad, (x1 - x0) + 2 * pad, (y1 - y0) + 2 * pad)
 
     def painted_polygons(self) -> list[list[float]]:
-        """塗った領域を COCO polygon 列(画像座標)へ変換して返す。空なら []。
+        """塗ったマスクを COCO polygon 列(画像座標)へ変換して返す。空なら []。
 
-        simplified() は自己接触点に極小の退化ループ(スリバー)を作り、塗り残しは
-        逆巻きの穴輪郭を作る。前者は細い横線として、後者は余計なリングとして
-        描画されてしまうため、面積と巻き向きで除外する。
+        マスクのアルファ面を 2値化し、mask_polygon(OpenCV の輪郭抽出+間引き)へ
+        渡すだけ。コストはマスクの大きさで決まり、塗った時間には依存しない。
         """
-        if self._paint_path is None or self._paint_path.isEmpty():
+        if self._mask_image is None:
+            return []
+        img = self._mask_image
+        w, h = img.width(), img.height()
+        if w == 0 or h == 0:
             return []
 
-        contours: list[tuple[list[tuple[float, float]], float]] = []
-        for poly in self._paint_path.simplified().toSubpathPolygons():
-            pts = [(p.x(), p.y()) for p in poly]
-            if len(pts) >= 2 and pts[0] == pts[-1]:
-                pts = pts[:-1]  # 末尾の始点複製を落とす
-            cleaned = _dedup_points(pts)
-            if len(cleaned) >= 3:
-                contours.append((cleaned, _signed_area(cleaned)))
-        if not contours:
-            return []
-
-        # 最大輪郭の巻き向きを「外周」とみなし、逆向き(穴)と極小(スリバー)を捨てる
-        outer_positive = max(contours, key=lambda c: abs(c[1]))[1] >= 0
-        min_area = (style.BRUSH_RADIUS * 0.5) ** 2
-
-        result: list[list[float]] = []
-        for cleaned, area in contours:
-            if abs(area) < min_area:
-                continue  # 自己接触部の退化ループ(細い横線の正体)
-            if (area >= 0) != outer_positive:
-                continue  # 塗り残しの穴(逆巻き)は塗り領域にしない
-            flat: list[float] = []
-            for x, y in cleaned:
-                flat.extend((round(float(x), 2), round(float(y), 2)))
-            result.append(flat)
-        return result
+        # ARGB32 のバッファを numpy で覗く。リトルエンディアンでは各画素は
+        # メモリ上 B,G,R,A の順なので、4 バイト目(index 3)がアルファ = 塗りの有無。
+        stride = img.bytesPerLine()
+        buf = np.frombuffer(img.constBits(), dtype=np.uint8, count=stride * h)
+        alpha = buf.reshape(h, stride)[:, 3 : w * 4 : 4]
+        return mask_to_polygons(
+            alpha,
+            epsilon=style.PAINT_SIMPLIFY_EPSILON,
+            min_area=style.PAINT_MIN_AREA,
+        )
 
     # --- パン(中ボタンドラッグ)----------------------------------------------
     def _pan_by(self, delta: QPoint) -> None:
@@ -429,23 +446,22 @@ class ImageView(QGraphicsView):
         return sorted(found)
 
 
-def _dedup_points(
-    pts: list[tuple[float, float]], min_dist: float = 1.0
-) -> list[tuple[float, float]]:
-    """連続する近接点(距離 < min_dist)を間引いて点数を減らす。"""
-    cleaned: list[tuple[float, float]] = []
-    for p in pts:
-        if not cleaned or math.hypot(p[0] - cleaned[-1][0], p[1] - cleaned[-1][1]) >= min_dist:
-            cleaned.append(p)
-    return cleaned
+class _MaskItem(QGraphicsItem):
+    """塗りマスク画像を表示するだけの軽量アイテム。
 
+    paint() は画像を drawImage するだけだが、Qt は露出領域(exposedRect)しか
+    転送しないため、塗った箇所だけを update() すれば毎フレームの描画コストは筆の
+    周辺に収まる。画像全体を QPixmap へ変換し直す方式と違い、大きな画像でも塗りが
+    重くならない。
+    """
 
-def _signed_area(pts: list[tuple[float, float]]) -> float:
-    """多角形の符号付き面積(靴ひも公式)。符号は巻き向きを表す。"""
-    s = 0.0
-    n = len(pts)
-    for i in range(n):
-        x1, y1 = pts[i]
-        x2, y2 = pts[(i + 1) % n]
-        s += x1 * y2 - x2 * y1
-    return s / 2.0
+    def __init__(self, image: QImage):
+        super().__init__()
+        self._image = image
+
+    def boundingRect(self) -> QRectF:
+        return QRectF(self._image.rect())
+
+    def paint(self, painter, option, widget=None) -> None:
+        r = option.exposedRect
+        painter.drawImage(r, self._image, r)

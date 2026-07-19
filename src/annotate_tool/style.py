@@ -25,6 +25,9 @@ Z_SELECTED = 1.0
 ADD_DIM_ALPHA = 130  # 追加モード中に全体へかける暗幕の濃さ
 BRUSH_RADIUS = 12.0  # 塗りブラシの半径(画像=シーン座標のピクセル)
 PAINT_COLOR = QColor(90, 220, 150, 150)  # 塗った領域の表示色(半透明)
+# 確定時にマスクを polygon 化するときのパラメータ(mask_polygon へ渡す)。
+PAINT_SIMPLIFY_EPSILON = 1.5  # approxPolyDP の許容誤差[px]。大きいほど点が減る。
+PAINT_MIN_AREA = (BRUSH_RADIUS * 0.5) ** 2  # これ未満の塗り領域はスリバーとして捨てる
 Z_ADD_DIM = 3.0  # 追加モードの暗幕(オーバーレイより上)
 Z_PAINT = 3.5  # 塗った領域(暗幕より上)
 

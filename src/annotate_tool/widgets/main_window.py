@@ -25,15 +25,17 @@ from annotate_tool import style
 from annotate_tool.coco_data import CocoDataset
 from annotate_tool.state import ViewerState
 from annotate_tool.widgets.action_bar import FloatingActionBar
-from annotate_tool.widgets.control_bar import FloatingControlBar
+from annotate_tool.widgets.control_group import ControlGroup
 from annotate_tool.widgets.image_view import ImageView
 from annotate_tool.widgets.instance_panel import InstancePanel
+from annotate_tool.widgets.side_panel import SidePanel
 
 
 class ViewerWindow(QMainWindow):
     def __init__(self, dataset: CocoDataset):
         super().__init__()
         self.state = ViewerState(dataset, self)
+        self._did_initial_fit = False
 
         self.setWindowTitle("COCO Segmentation Viewer")
         self.resize(*style.WINDOW_SIZE)
@@ -45,8 +47,12 @@ class ViewerWindow(QMainWindow):
         self.panel = InstancePanel(self)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.panel)
 
+        # 右側は操作パネル(左の一覧と同じ幅を確保)。移動・表示の操作を置く。
+        self.side_panel = SidePanel("操作", parent=self)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.side_panel)
+
         self._build_actions()
-        self._build_control_bars()
+        self._build_side_controls()
 
         self.setStatusBar(QStatusBar(self))
         self._info_label = QLabel()
@@ -58,6 +64,14 @@ class ViewerWindow(QMainWindow):
             self._load_image(self.state.image_index)
         else:
             self.statusBar().showMessage("画像がありません")
+
+    def showEvent(self, event) -> None:
+        # 初回表示までビューポートは最終サイズにならないため、表示後に一度フィットする
+        # (__init__ 内の fit は起動時のサイズを基準にしてしまいずれる)。
+        super().showEvent(event)
+        if not self._did_initial_fit:
+            self._did_initial_fit = True
+            self.view.fit()
 
     # --- 組み立て -----------------------------------------------------------
     def _build_actions(self) -> None:
@@ -77,9 +91,15 @@ class ViewerWindow(QMainWindow):
         make("選択解除", ["Esc"], self.state.deselect)
         make("削除", ["Delete"], self._delete_selected)
 
-    def _build_control_bars(self) -> None:
-        """ビューの左下(「表示」カテゴリ)と右上(画像送り)へ操作ボタンを浮かべる。"""
-        display = FloatingControlBar(self.view, anchor="bottom-left", title="表示")
+    def _build_side_controls(self) -> None:
+        """右パネルに「画像の移動」と「表示」の操作グループを積む。"""
+        nav = ControlGroup("画像の移動")
+        nav.add_row(
+            [("◀ 前", self.state.prev_image), ("次 ▶", self.state.next_image)]
+        )
+        self.side_panel.add_widget(nav)
+
+        display = ControlGroup("表示")
         display.add_button("フィット (F)", self.view.fit)
         self._overlay_btn = display.add_button(
             "オーバーレイ (V)", self.state.toggle_overlay, checkable=True
@@ -87,12 +107,7 @@ class ViewerWindow(QMainWindow):
         self._fill_btn = display.add_button("塗り (B)", self.state.toggle_fill, checkable=True)
         self._overlay_btn.setChecked(self.state.overlay_visible)
         self._fill_btn.setChecked(self.state.fill_visible)
-        self.control_bar_display = display
-
-        nav = FloatingControlBar(self.view, anchor="top-right")
-        nav.add_button("◀ 前", self.state.prev_image)
-        nav.add_button("次 ▶", self.state.next_image)
-        self.control_bar_nav = nav
+        self.side_panel.add_widget(display)
 
     def _connect_signals(self) -> None:
         # ユーザー操作 -> 状態

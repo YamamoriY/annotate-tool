@@ -41,8 +41,9 @@ src/annotate_tool/
 └── widgets/
     ├── main_window.py     # 組み立てと配線のみ(composition root)
     ├── image_view.py      # 画像 + ポリゴン描画ビュー
-    ├── instance_panel.py  # インスタンス一覧ドック
-    ├── control_bar.py     # 浮動操作バー(左上=フィット/表示トグル、右上=前/次)
+    ├── instance_panel.py  # インスタンス一覧ドック(左)
+    ├── side_panel.py      # 操作パネル・ドック(右)
+    ├── control_group.py   # 見出し付きボタングループ(移動 / 表示)
     └── action_bar.py      # 浮動アクションバー(選択解除 / 削除)
 ```
 

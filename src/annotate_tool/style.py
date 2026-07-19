@@ -65,6 +65,17 @@ QLabel {
     font-size: 11px;
     font-weight: bold;
     padding: 0 4px;
+    background: transparent;
+    border: none;
+}
+"""
+
+# カテゴリでまとめる浮動バーの外枠(枠線 + 半透明背景)。
+CONTROL_GROUP_QSS = """
+#controlGroup {
+    background-color: rgba(30, 30, 30, 140);
+    border: 1px solid rgba(255, 255, 255, 60);
+    border-radius: 12px;
 }
 """
 

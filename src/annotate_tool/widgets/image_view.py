@@ -14,6 +14,7 @@ from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QCursor,
     QPainter,
     QPainterPath,
     QPen,
@@ -200,10 +201,14 @@ class ImageView(QGraphicsView):
     def fit(self) -> None:
         if self._pixmap_item is not None:
             self.fitInView(self._pixmap_item, Qt.KeepAspectRatio)
+        if self._add_mode:
+            self._update_brush_cursor()  # 倍率が変わったのでブラシ円を作り直す
 
     def wheelEvent(self, event) -> None:
         factor = style.ZOOM_STEP if event.angleDelta().y() > 0 else 1 / style.ZOOM_STEP
         self.scale(factor, factor)
+        if self._add_mode:
+            self._update_brush_cursor()  # 倍率が変わったのでブラシ円を作り直す
 
     # --- 追加(塗りつぶし)モード --------------------------------------------
     def set_add_mode(self, active: bool) -> None:
@@ -229,10 +234,33 @@ class ImageView(QGraphicsView):
             )
             self._paint_item.setZValue(style.Z_PAINT)
             self.setDragMode(QGraphicsView.NoDrag)
-            self.setCursor(Qt.CrossCursor)
+            self._update_brush_cursor()
         else:
             self.setDragMode(QGraphicsView.RubberBandDrag)
             self.unsetCursor()
+
+    def _update_brush_cursor(self) -> None:
+        """ブラシ半径(画像座標)を現在のズーム倍率で画面サイズに直し、
+        その太さの円の輪郭をカーソルにする。ズームすると呼び直す。"""
+        scale = self.transform().m11()  # ビューは等方スケールのみ
+        diameter = max(6.0, min(2.0 * style.BRUSH_RADIUS * scale, 512.0))
+        margin = 2
+        size = int(math.ceil(diameter)) + margin * 2
+        pm = QPixmap(size, size)
+        pm.fill(Qt.transparent)
+        painter = QPainter(pm)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        center = size / 2.0
+        rect = QRectF(
+            center - diameter / 2.0, center - diameter / 2.0, diameter, diameter
+        )
+        # 背景の明暗を問わず見えるよう、黒縁の上に白線を重ねる
+        painter.setPen(QPen(QColor(0, 0, 0, 180), 3))
+        painter.drawEllipse(rect)
+        painter.setPen(QPen(QColor(255, 255, 255, 235), 1.2))
+        painter.drawEllipse(rect)
+        painter.end()
+        self.setCursor(QCursor(pm, int(center), int(center)))
 
     def _clear_paint(self) -> None:
         """塗り・暗幕アイテムをシーンから取り除く。"""
@@ -337,7 +365,7 @@ class ImageView(QGraphicsView):
             self._panning = False
             self._pan_origin = None
             # 追加モード中はブラシカーソルへ戻す
-            self.setCursor(Qt.CrossCursor) if self._add_mode else self.unsetCursor()
+            self._update_brush_cursor() if self._add_mode else self.unsetCursor()
             event.accept()
             return
 

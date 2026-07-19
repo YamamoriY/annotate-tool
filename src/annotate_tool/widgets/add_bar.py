@@ -31,7 +31,7 @@ class AddBar(QWidget):
         layout.setSpacing(style.FLOATING_BUTTON_SPACING)
 
         self._add_btn = self._make_button(
-            "＋ 追加", style.ADD_BUTTON_QSS, self.addClicked
+            "＋ 追加 (A)", style.ADD_BUTTON_QSS, self.addClicked
         )
         self._confirm_btn = self._make_button(
             "✓ 確定 (Enter)", style.CONFIRM_BUTTON_QSS, self.confirmClicked

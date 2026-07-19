@@ -230,23 +230,33 @@ def test_enter_add_mode_clears_selection(dataset: StubDataset):
     assert selections[-1] == ()  # 選択解除が通知される
 
 
-def test_add_painted_adds_annotation_and_saves(dataset: StubDataset):
+def test_add_painted_adds_to_memory_and_requests_save(dataset: StubDataset):
     state = ViewerState(dataset)
     refreshed: list[int] = []
+    save_reqs: list[int] = []
     state.annotationsChanged.connect(lambda: refreshed.append(1))
+    state.saveRequested.connect(lambda: save_reqs.append(1))
 
     polygons = [[0, 0, 10, 0, 10, 10, 0, 10]]
     ok = state.add_painted(polygons)
     assert ok is True
-    assert dataset.saved is True
     assert len(dataset.added) == 1
     assert dataset.added[0].image_id == 1
     assert dataset.added[0].segmentation == polygons
     assert refreshed == [1]
+    assert save_reqs == [1]  # 保存は要求されるが
+    assert dataset.saved is False  # まだディスクへは書かない(遅延)
+
+    # flush_save で初めてディスク保存が走る
+    state.flush_save()
+    assert dataset.saved is True
 
 
 def test_add_painted_ignores_empty(dataset: StubDataset):
     state = ViewerState(dataset)
+    save_reqs: list[int] = []
+    state.saveRequested.connect(lambda: save_reqs.append(1))
     assert state.add_painted([]) is False
     assert dataset.saved is False
     assert dataset.added == []
+    assert save_reqs == []

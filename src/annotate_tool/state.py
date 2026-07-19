@@ -28,6 +28,8 @@ class ViewerState(QObject):
     overlayVisibleChanged = Signal(bool)
     fillVisibleChanged = Signal(bool)
     addModeChanged = Signal(bool)  # 追加(塗りつぶし)モードの ON/OFF
+    # 未保存の変更が生じた(実際のディスク保存は呼び出し側が遅延して行う)
+    saveRequested = Signal()
 
     def __init__(self, dataset: CocoDataset, parent: QObject | None = None):
         super().__init__(parent)
@@ -143,17 +145,22 @@ class ViewerState(QObject):
         self.addModeChanged.emit(False)
 
     def add_painted(self, polygons: list[list[float]]) -> bool:
-        """塗ってできたポリゴン列を新規アノテーションとして追加し保存する。
+        """塗ってできたポリゴン列を新規アノテーションとしてメモリに追加する。
 
         追加できたら True。現在画像がない/ポリゴンが空なら何もせず False。
+        ディスク保存はここでは行わず saveRequested を出す(呼び出し側が遅延保存する)。
         """
         image = self.current_image()
         if image is None or not polygons:
             return False
         self._dataset.add_annotation(image.id, polygons)
-        self._dataset.save()
         self.annotationsChanged.emit()
+        self.saveRequested.emit()
         return True
+
+    def flush_save(self) -> None:
+        """保留中の変更をディスクへ書き出す(重い処理。遅延実行される想定)。"""
+        self._dataset.save()
 
     # --- 編集 ---------------------------------------------------------------
     def delete_selected(self) -> None:

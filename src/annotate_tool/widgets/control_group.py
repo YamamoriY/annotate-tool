@@ -58,6 +58,14 @@ class ControlGroup(QWidget):
         self._outer.addLayout(row)
         return buttons
 
+    def add_text(self, text: str) -> QLabel:
+        """説明用のテキスト行を追加する(操作方法の案内などに使う)。"""
+        label = QLabel(text, self)
+        label.setStyleSheet(style.CONTROL_HELP_QSS)
+        label.setWordWrap(True)
+        self._outer.addWidget(label)
+        return label
+
     def _make_button(self, text: str, slot, checkable: bool) -> QPushButton:
         btn = QPushButton(text, self)
         btn.setCursor(Qt.PointingHandCursor)

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QStatusBar,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 
 from annotate_tool import style
 from annotate_tool.coco_data import CocoDataset
@@ -38,6 +38,7 @@ class ViewerWindow(QMainWindow):
         self.state = ViewerState(dataset, self)
         self._did_initial_fit = False
         self._painting_started = False  # 追加モードで塗り始めたか(上部ボタン制御用)
+        self._save_dirty = False  # 未保存の変更があるか(遅延保存用)
 
         self.setWindowTitle("COCO Segmentation Viewer")
         self.resize(*style.WINDOW_SIZE)
@@ -58,6 +59,9 @@ class ViewerWindow(QMainWindow):
         self._build_side_controls()
 
         self.setStatusBar(QStatusBar(self))
+        self._saving_label = QLabel()  # 右下の「保存中…」表示(遅延保存)
+        self._saving_label.setStyleSheet(style.SAVING_LABEL_QSS)
+        self.statusBar().addPermanentWidget(self._saving_label)
         self._info_label = QLabel()
         self.statusBar().addPermanentWidget(self._info_label)
 
@@ -88,8 +92,9 @@ class ViewerWindow(QMainWindow):
             return action
 
         # ショートカットのみ(ボタンはビュー上の浮動バーが担う)。
-        make("前", ["Left", "A"], self.state.prev_image)
+        make("前", ["Left"], self.state.prev_image)
         make("次", ["Right", "D", "Space"], self.state.next_image)
+        make("追加", ["A"], self._on_add_shortcut)
         make("フィット", ["F"], self.view.fit)
         make("オーバーレイ", ["V"], self.state.toggle_overlay)
         make("塗り", ["B"], self.state.toggle_fill)
@@ -101,7 +106,7 @@ class ViewerWindow(QMainWindow):
         """右パネルに「画像の移動」と「表示」の操作グループを積む。"""
         nav = ControlGroup("画像の移動")
         nav.add_row(
-            [("◀ 前", self.state.prev_image), ("次 ▶", self.state.next_image)]
+            [("◀ 前 (←)", self.state.prev_image), ("次 ▶ (→)", self.state.next_image)]
         )
         self.side_panel.add_widget(nav)
 
@@ -114,6 +119,12 @@ class ViewerWindow(QMainWindow):
         self._overlay_btn.setChecked(self.state.overlay_visible)
         self._fill_btn.setChecked(self.state.fill_visible)
         self.side_panel.add_widget(display)
+
+        guide = ControlGroup("操作方法")
+        guide.add_text("左ドラッグ： 範囲選択")
+        guide.add_text("中ドラッグ： 画像の移動")
+        guide.add_text("ホイール： ズーム")
+        self.side_panel.add_widget(guide)
 
     def _connect_signals(self) -> None:
         # ユーザー操作 -> 状態
@@ -133,6 +144,7 @@ class ViewerWindow(QMainWindow):
         self.state.overlayVisibleChanged.connect(self.view.set_overlay_visible)
         self.state.fillVisibleChanged.connect(self.view.set_fill_visible)
         self.state.addModeChanged.connect(self._on_add_mode_changed)
+        self.state.saveRequested.connect(self._schedule_save)
         # トグルボタンの見た目を状態に追従させる(ショートカット操作でも更新される)
         self.state.overlayVisibleChanged.connect(self._overlay_btn.setChecked)
         self.state.fillVisibleChanged.connect(self._fill_btn.setChecked)
@@ -185,6 +197,16 @@ class ViewerWindow(QMainWindow):
             self._painting_started = False
         self._update_top_bar()
 
+    def _on_add_shortcut(self) -> None:
+        # 「追加」ボタンが出ている状態(通常時・未選択)のときだけ追加モードへ入る。
+        if not self.state.add_mode and not self.state.selected_indices:
+            self.state.enter_add_mode()
+
+    def _on_add_shortcut(self) -> None:
+        # A キーは「追加」ボタンが出ているとき(通常時・未選択)だけ有効にする
+        if not self.state.add_mode and not self.state.selected_indices:
+            self.state.enter_add_mode()
+
     def _on_paint_started(self) -> None:
         self._painting_started = True
         self._update_top_bar()  # 塗り始めたら「確定」を出す
@@ -220,6 +242,36 @@ class ViewerWindow(QMainWindow):
             self.add_bar.hide_all()
         else:
             self.add_bar.show_add()
+
+    # --- 遅延保存 -----------------------------------------------------------
+    def _schedule_save(self) -> None:
+        """保存要求を受けたら「保存中…」を出し、描画を挟んでから遅延保存する。"""
+        self._save_dirty = True
+        self._saving_label.setText("保存中…")
+        # 通常画面と「保存中…」を先に描画させるため、少し遅らせて保存する
+        QTimer.singleShot(style.SAVE_DELAY_MS, self._do_save)
+
+    def _do_save(self) -> None:
+        if not self._save_dirty:
+            return
+        self._save_dirty = False
+        self.state.flush_save()  # 重い処理(この間だけ短時間ブロック)
+        # 保存中に新たな要求が来ていれば、それは別の singleShot が拾う
+        if not self._save_dirty:
+            self._saving_label.setText("保存しました")
+            QTimer.singleShot(style.SAVE_DONE_HOLD_MS, self._clear_saved_label)
+
+    def _clear_saved_label(self) -> None:
+        # 表示中に次の保存が始まっていたら消さない
+        if not self._save_dirty:
+            self._saving_label.clear()
+
+    def closeEvent(self, event) -> None:
+        # 遅延保存が残ったまま終了すると変更が失われるため、確実に書き出す
+        if self._save_dirty:
+            self._save_dirty = False
+            self.state.flush_save()
+        super().closeEvent(event)
 
     # --- ユーザー操作 -> 状態 -------------------------------------------------
     def _on_instance_clicked(self, index: int, additive: bool) -> None:

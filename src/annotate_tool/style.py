@@ -77,6 +77,17 @@ QLabel {
 }
 """
 
+# 操作説明などの補助テキスト(見出しより淡く、少し小さめ)。
+CONTROL_HELP_QSS = """
+QLabel {
+    color: rgba(255, 255, 255, 150);
+    font-size: 12px;
+    padding: 0 4px;
+    background: transparent;
+    border: none;
+}
+"""
+
 # カテゴリでまとめる浮動バーの外枠(枠線 + 半透明背景)。
 CONTROL_GROUP_QSS = """
 #controlGroup {
@@ -111,6 +122,11 @@ QPushButton {
 QPushButton:hover { background-color: rgba(190, 55, 55, 230); }
 QPushButton:pressed { background-color: rgba(120, 25, 25, 240); }
 """
+
+# ステータスバー右下の「保存中…」表示(遅延保存の進捗)。
+SAVING_LABEL_QSS = "QLabel { color: rgba(230, 230, 230, 200); font-size: 12px; }"
+SAVE_DELAY_MS = 40  # 確定後、通常画面を描画してから保存するまでの遅延
+SAVE_DONE_HOLD_MS = 900  # 「保存しました」を表示しておく時間
 
 # 「追加」ボタン(通常時に上部へ表示)。
 ADD_BUTTON_QSS = """

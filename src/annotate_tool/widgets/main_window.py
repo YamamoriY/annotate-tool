@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QStatusBar,
-    QToolBar,
 )
 from PySide6.QtCore import Qt
 
@@ -26,6 +25,7 @@ from annotate_tool import style
 from annotate_tool.coco_data import CocoDataset
 from annotate_tool.state import ViewerState
 from annotate_tool.widgets.action_bar import FloatingActionBar
+from annotate_tool.widgets.control_bar import FloatingControlBar
 from annotate_tool.widgets.image_view import ImageView
 from annotate_tool.widgets.instance_panel import InstancePanel
 
@@ -46,7 +46,7 @@ class ViewerWindow(QMainWindow):
         self.addDockWidget(Qt.LeftDockWidgetArea, self.panel)
 
         self._build_actions()
-        self._build_toolbar()
+        self._build_control_bars()
 
         self.setStatusBar(QStatusBar(self))
         self._info_label = QLabel()
@@ -68,24 +68,31 @@ class ViewerWindow(QMainWindow):
             self.addAction(action)  # ツールバー未追加でもショートカットを有効にする
             return action
 
-        self.act_prev = make("◀ 前 (←)", ["Left", "A"], self.state.prev_image)
-        self.act_next = make("次 (→) ▶", ["Right", "D", "Space"], self.state.next_image)
-        self.act_fit = make("フィット (F)", ["F"], self.view.fit)
-        self.act_overlay = make("オーバーレイ (V)", ["V"], self.state.toggle_overlay)
-        self.act_fill = make("塗り (B)", ["B"], self.state.toggle_fill)
-        self.act_deselect = make("選択解除", ["Esc"], self.state.deselect)
-        self.act_delete = make("削除", ["Delete"], self._delete_selected)
+        # ショートカットのみ(ボタンはビュー上の浮動バーが担う)。
+        make("前", ["Left", "A"], self.state.prev_image)
+        make("次", ["Right", "D", "Space"], self.state.next_image)
+        make("フィット", ["F"], self.view.fit)
+        make("オーバーレイ", ["V"], self.state.toggle_overlay)
+        make("塗り", ["B"], self.state.toggle_fill)
+        make("選択解除", ["Esc"], self.state.deselect)
+        make("削除", ["Delete"], self._delete_selected)
 
-    def _build_toolbar(self) -> None:
-        tb = QToolBar("Navigation", self)
-        tb.setMovable(False)
-        self.addToolBar(tb)
-        tb.addAction(self.act_prev)
-        tb.addAction(self.act_next)
-        tb.addSeparator()
-        tb.addAction(self.act_fit)
-        tb.addAction(self.act_overlay)
-        tb.addAction(self.act_fill)
+    def _build_control_bars(self) -> None:
+        """ビューの左下(「表示」カテゴリ)と右上(画像送り)へ操作ボタンを浮かべる。"""
+        display = FloatingControlBar(self.view, anchor="bottom-left", title="表示")
+        display.add_button("フィット (F)", self.view.fit)
+        self._overlay_btn = display.add_button(
+            "オーバーレイ (V)", self.state.toggle_overlay, checkable=True
+        )
+        self._fill_btn = display.add_button("塗り (B)", self.state.toggle_fill, checkable=True)
+        self._overlay_btn.setChecked(self.state.overlay_visible)
+        self._fill_btn.setChecked(self.state.fill_visible)
+        self.control_bar_display = display
+
+        nav = FloatingControlBar(self.view, anchor="top-right")
+        nav.add_button("◀ 前", self.state.prev_image)
+        nav.add_button("次 ▶", self.state.next_image)
+        self.control_bar_nav = nav
 
     def _connect_signals(self) -> None:
         # ユーザー操作 -> 状態
@@ -101,6 +108,9 @@ class ViewerWindow(QMainWindow):
         self.state.annotationsChanged.connect(self._refresh_overlays)
         self.state.overlayVisibleChanged.connect(self.view.set_overlay_visible)
         self.state.fillVisibleChanged.connect(self.view.set_fill_visible)
+        # トグルボタンの見た目を状態に追従させる(ショートカット操作でも更新される)
+        self.state.overlayVisibleChanged.connect(self._overlay_btn.setChecked)
+        self.state.fillVisibleChanged.connect(self._fill_btn.setChecked)
 
     # --- 状態 -> 表示 --------------------------------------------------------
     def _load_image(self, index: int) -> None:

@@ -31,10 +31,42 @@ CLICK_DRAG_THRESHOLD = 4
 WINDOW_SIZE = (1400, 900)
 DOCK_MIN_WIDTH = 240
 FLOATING_BUTTON_TOP_MARGIN = 12
+FLOATING_BUTTON_BOTTOM_MARGIN = 12  # 下端に寄せる浮動バーの余白
+FLOATING_BUTTON_SIDE_MARGIN = 12  # 左右端に寄せる浮動バーの余白
 COLOR_ICON_SIZE = 12
 
 # --- 浮動アクションバー(選択中に表示)--------------------------------------
 FLOATING_BUTTON_SPACING = 8  # バー内のボタン間隔
+
+# 常時表示する操作ボタン(左下=「表示」トグル、右上=前/次)。
+# トグルは checked 状態を灰色に強調して ON/OFF を一目で分かるようにする。
+CONTROL_BUTTON_QSS = """
+QPushButton {
+    background-color: rgba(40, 40, 40, 200);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 90);
+    border-radius: 14px;
+    padding: 6px 16px;
+    font-size: 13px;
+}
+QPushButton:hover { background-color: rgba(70, 70, 70, 220); }
+QPushButton:pressed { background-color: rgba(20, 20, 20, 230); }
+QPushButton:checked {
+    background-color: rgba(120, 120, 120, 230);
+    border: 1px solid rgba(220, 220, 220, 150);
+}
+QPushButton:checked:hover { background-color: rgba(140, 140, 140, 240); }
+"""
+
+# 浮動バーのカテゴリ見出し(例: 「表示」)。
+CONTROL_LABEL_QSS = """
+QLabel {
+    color: rgba(255, 255, 255, 180);
+    font-size: 11px;
+    font-weight: bold;
+    padding: 0 4px;
+}
+"""
 
 DESELECT_BUTTON_QSS = """
 QPushButton {

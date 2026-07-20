@@ -135,6 +135,7 @@ class ViewerWindow(QMainWindow):
         self.action_bar.deselectClicked.connect(self.state.deselect)
         self.action_bar.deleteClicked.connect(self._delete_selected)
         self.add_bar.addClicked.connect(self.state.enter_add_mode)
+        self.add_bar.cancelClicked.connect(self.state.cancel_add_mode)
         self.add_bar.confirmClicked.connect(self._confirm_add)
 
         # 状態 -> 表示
@@ -198,11 +199,6 @@ class ViewerWindow(QMainWindow):
         self._update_top_bar()
 
     def _on_add_shortcut(self) -> None:
-        # 「追加」ボタンが出ている状態(通常時・未選択)のときだけ追加モードへ入る。
-        if not self.state.add_mode and not self.state.selected_indices:
-            self.state.enter_add_mode()
-
-    def _on_add_shortcut(self) -> None:
         # A キーは「追加」ボタンが出ているとき(通常時・未選択)だけ有効にする
         if not self.state.add_mode and not self.state.selected_indices:
             self.state.enter_add_mode()
@@ -230,14 +226,11 @@ class ViewerWindow(QMainWindow):
     def _update_top_bar(self) -> None:
         """上部ボタン(追加 / 確定)の表示を状態から決める。
 
-        - 追加モード中: 塗り始めたら「確定」、まだなら何も出さない。
+        - 追加モード中: 常に「キャンセル」、塗り始めたら「確定」も並べる。
         - 通常時: 未選択なら「追加」、選択中(範囲選択含む)は「追加」を隠す。
         """
         if self.state.add_mode:
-            if self._painting_started:
-                self.add_bar.show_confirm()
-            else:
-                self.add_bar.hide_all()
+            self.add_bar.show_adding(self._painting_started)
         elif self.state.selected_indices:
             self.add_bar.hide_all()
         else:

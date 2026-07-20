@@ -145,6 +145,9 @@ QPushButton:hover { background-color: rgba(70, 70, 70, 220); }
 QPushButton:pressed { background-color: rgba(20, 20, 20, 230); }
 """
 
+# 「キャンセル」ボタン(追加モード中は常に上部へ表示)。
+CANCEL_BUTTON_QSS = DESELECT_BUTTON_QSS
+
 # 「確定」ボタン(塗り始めたら上部へ表示)。
 CONFIRM_BUTTON_QSS = """
 QPushButton {

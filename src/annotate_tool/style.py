@@ -34,6 +34,18 @@ PAINT_SIMPLIFY_EPSILON = 1.5  # approxPolyDP の許容誤差[px]。大きいほ�
 Z_ADD_DIM = 3.0  # 追加モードの暗幕(オーバーレイより上)
 Z_PAINT = 3.5  # 塗った領域(暗幕より上)
 
+# --- パス(頂点クリック)ツール ----------------------------------------------
+# 閉じるとマスクへ焼かれるため、ここにあるのは「作図中」の見た目だけ。
+PATH_MIN_POINTS = 3  # これ未満では閉じられない
+PATH_CLOSE_THRESHOLD = 12  # 最初の頂点へ吸着して閉じる距離[ビュー座標 px]
+PATH_VERTEX_SIZE = 8  # 頂点ハンドルの一辺[ビュー座標 px]
+PATH_PEN_WIDTH = 2.0
+PATH_COLOR = QColor(90, 220, 150, 230)  # 確定済みの辺(PAINT_COLOR と同系で濃いめ)
+PATH_HANDLE_COLOR = QColor(255, 255, 255, 230)  # 頂点ハンドルの塗り
+PATH_RUBBER_COLOR = QColor(255, 255, 255, 160)  # 最終頂点→カーソルの追従線
+PATH_HINT_TEXT = "クリックで頂点\n最初の点で閉じる"
+Z_PATH = 4.0  # 作図中のパス(塗りより上)
+
 # --- ビュー操作 -------------------------------------------------------------
 ZOOM_STEP = 1.25  # ホイール 1 ノッチあたりの拡大率
 VIEW_BACKGROUND = QColor(30, 30, 30)

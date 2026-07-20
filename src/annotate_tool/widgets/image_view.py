@@ -11,19 +11,22 @@ import math
 from collections.abc import Iterable
 
 import numpy as np
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QLineF, QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
     QCursor,
     QImage,
     QPainter,
+    QPainterPath,
     QPen,
     QPixmap,
     QPolygonF,
 )
 from PySide6.QtWidgets import (
     QGraphicsItem,
+    QGraphicsLineItem,
+    QGraphicsPathItem,
     QGraphicsPixmapItem,
     QGraphicsPolygonItem,
     QGraphicsRectItem,
@@ -35,6 +38,13 @@ from annotate_tool import style
 from annotate_tool.coco_data import Annotation
 from annotate_tool.mask_polygon import mask_to_polygons
 from annotate_tool.tools import Tool
+
+
+def is_within(a: QPoint, b: QPoint, threshold: float) -> bool:
+    """2点がビュー座標で threshold px 以内にあるか(パスを閉じる吸着判定)。"""
+    dx = a.x() - b.x()
+    dy = a.y() - b.y()
+    return dx * dx + dy * dy <= threshold * threshold
 
 
 class ImageView(QGraphicsView):
@@ -90,11 +100,21 @@ class ImageView(QGraphicsView):
         self._hidden_items: list[QGraphicsPolygonItem] = []
         self._tool = Tool.BRUSH
         # 半径はツールごとに独立。スライダーで変わり、モードを跨いでも保持する。
+        # パスには半径の概念が無いため、ここに Tool.POLYGON は入れない。
         self._radii = {
             Tool.BRUSH: style.BRUSH_RADIUS,
             Tool.ERASER: style.ERASER_RADIUS,
         }
         self._min_paint_radius = style.BRUSH_RADIUS_MAX  # この回で使った最も細い筆
+
+        # パス(頂点クリック)ツールの作図中状態。閉じた時点でマスクへ焼くので、
+        # ここにあるのは一時的な見た目だけ。頂点は確定後まで持ち越さない。
+        self._path_points: list[QPointF] = []  # 打った頂点(シーン座標)
+        self._path_item: QGraphicsPathItem | None = None  # 確定済みの辺
+        self._path_rubber: QGraphicsLineItem | None = None  # 最終頂点→カーソル
+        self._path_handles: list[QGraphicsRectItem] = []  # 頂点ハンドル
+        # ボタンを押していなくてもラバーバンドを追従させるため
+        self.setMouseTracking(True)
 
     # --- シーン構築 ---------------------------------------------------------
     def set_image(self, pixmap: QPixmap) -> None:
@@ -219,13 +239,13 @@ class ImageView(QGraphicsView):
         if self._pixmap_item is not None:
             self.fitInView(self._pixmap_item, Qt.KeepAspectRatio)
         if self._add_mode:
-            self._update_brush_cursor()  # 倍率が変わったのでブラシ円を作り直す
+            self._apply_cursor()  # 倍率が変わったのでブラシ円を作り直す
 
     def wheelEvent(self, event) -> None:
         factor = style.ZOOM_STEP if event.angleDelta().y() > 0 else 1 / style.ZOOM_STEP
         self.scale(factor, factor)
         if self._add_mode:
-            self._update_brush_cursor()  # 倍率が変わったのでブラシ円を作り直す
+            self._apply_cursor()  # 倍率が変わったのでブラシ円を作り直す
 
     # --- 追加(塗りつぶし)モード --------------------------------------------
     def set_add_mode(
@@ -266,10 +286,9 @@ class ImageView(QGraphicsView):
                 if edit_annotation is not None and edit_index is not None:
                     self._prefill_mask(edit_index, edit_annotation)
             self.setDragMode(QGraphicsView.NoDrag)
-            self._update_brush_cursor()
         else:
             self.setDragMode(QGraphicsView.RubberBandDrag)
-            self.unsetCursor()
+        self._apply_cursor()
 
     def _prefill_mask(self, index: int, ann: Annotation) -> None:
         """修正対象の形をマスクへ焼き、元のポリゴン表示を隠す。
@@ -308,26 +327,51 @@ class ImageView(QGraphicsView):
         self._hidden_items = []
 
     def set_tool(self, tool: Tool) -> None:
-        """描画ツール(ブラシ / 消しゴム)を切り替える。"""
+        """描画ツール(ブラシ / 消しゴム / パス)を切り替える。
+
+        作図中のパスは持ち越さず破棄する。別のツールへ移った後も宙に浮いた頂点が
+        残っていると、Enter や Esc の意味が読めなくなるため。
+        """
         if tool is self._tool:
             return
+        self._clear_path()
         self._tool = tool
         if self._add_mode:
-            self._update_brush_cursor()  # 太さが変わるのでカーソルを作り直す
+            self._apply_cursor()  # 太さが変わるのでカーソルを作り直す
 
     def set_radius(self, tool: Tool, radius: float) -> None:
         """ツールごとの半径(画像座標 px)を変える。カーソルの円も追従させる。"""
+        if tool not in self._radii:
+            return  # パスなど半径を持たないツール
         radius = max(style.BRUSH_RADIUS_MIN, min(radius, style.BRUSH_RADIUS_MAX))
         if radius == self._radii[tool]:
             return
         self._radii[tool] = radius
         if self._add_mode and tool is self._tool:
-            self._update_brush_cursor()
+            self._apply_cursor()
 
     @property
     def _brush_radius(self) -> float:
-        """現在選択中のツールの半径。"""
-        return self._radii[self._tool]
+        """現在選択中のツールの半径(半径を持たないツールでは既定値)。"""
+        return self._radii.get(self._tool, style.BRUSH_RADIUS)
+
+    @property
+    def _is_path_tool(self) -> bool:
+        """パスツールを選択中か(マウス操作の分岐が塗りと大きく違うため)。"""
+        return self._tool is Tool.POLYGON
+
+    def _apply_cursor(self) -> None:
+        """現在のモードとツールに合ったカーソルを出す。
+
+        カーソルを変える必要がある箇所(モード切替・ツール切替・ズーム・パン終了)は
+        すべてここを通す。個別に setCursor すると分岐の追加漏れが起きるため。
+        """
+        if not self._add_mode:
+            self.unsetCursor()
+        elif self._tool is Tool.POLYGON:
+            self.setCursor(Qt.CrossCursor)  # パスは太さが無いので円を出さない
+        else:
+            self._update_brush_cursor()
 
     def _update_brush_cursor(self) -> None:
         """ブラシ半径(画像座標)を現在のズーム倍率で画面サイズに直し、
@@ -354,6 +398,7 @@ class ImageView(QGraphicsView):
 
     def _clear_paint(self) -> None:
         """塗り・暗幕アイテムをシーンから取り除き、マスクを捨てる。"""
+        self._clear_path()
         for attr in ("_paint_item", "_add_dim_item"):
             item = getattr(self, attr)
             if item is not None:
@@ -362,6 +407,143 @@ class ImageView(QGraphicsView):
         self._mask_image = None
         self._last_paint_pt = None
         self._min_paint_radius = style.BRUSH_RADIUS_MAX
+
+    # --- パス(頂点クリック)ツール ------------------------------------------
+    def has_path(self) -> bool:
+        """作図中のパス(頂点が1つ以上)があるか。"""
+        return bool(self._path_points)
+
+    def cancel_path(self) -> None:
+        """作図中のパスだけを破棄する(編集モードは抜けない)。"""
+        self._clear_path()
+
+    def undo_path_point(self) -> None:
+        """直前に打った頂点を1つ取り消す。"""
+        if not self._path_points:
+            return
+        self._path_points.pop()
+        if self._path_points:
+            self._refresh_path_items()
+        else:
+            self._clear_path()  # 全部消えたら作図前の状態へ戻す
+
+    def close_path(self) -> bool:
+        """作図中のパスを閉じ、囲んだ範囲をマスクへ焼く。閉じられたら True。
+
+        ここを通った時点でパスはただの塗りになる。頂点は保存されない。
+        """
+        pts = self._path_points
+        if len(pts) < style.PATH_MIN_POINTS or self._mask_image is None:
+            return False
+
+        poly = QPolygonF(pts)
+        # 設定は _prefill_mask / _paint_to と揃える。アンチエイリアスを切るのは、
+        # 縁のにじみがマスクを削って穴を作るのを防ぐため。
+        painter = QPainter(self._mask_image)
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(style.PAINT_COLOR))
+        painter.drawPolygon(poly)
+        painter.end()
+
+        # 小さく囲んだ領域が確定時にスリバーとして捨てられないようにする
+        # (筆の太さで面積を決める既定値は、パスには当てはまらないため)。
+        self._min_paint_radius = min(self._min_paint_radius, style.BRUSH_RADIUS_MIN)
+
+        dirty = poly.boundingRect().adjusted(-2.0, -2.0, 2.0, 2.0)
+        self._clear_path()
+        if self._paint_item is not None:
+            self._paint_item.update(dirty)
+        if not self._paint_started:
+            self._paint_started = True
+            self.paintStarted.emit()  # 上部に「確定」を出す
+        return True
+
+    def _clear_path(self) -> None:
+        """作図中のパスの一時アイテムをすべて捨てる。マスクには触れない。"""
+        self._path_points = []
+        while self._path_handles:
+            self._scene.removeItem(self._path_handles.pop())
+        for attr in ("_path_item", "_path_rubber"):
+            item = getattr(self, attr)
+            if item is not None:
+                self._scene.removeItem(item)
+                setattr(self, attr, None)
+
+    def _add_path_point(self, view_pos: QPoint) -> None:
+        """クリック位置に頂点を足す。最初の頂点の近くなら代わりに閉じる。"""
+        if len(self._path_points) >= style.PATH_MIN_POINTS and self._near_first(
+            view_pos
+        ):
+            self.close_path()
+            return
+        self._path_points.append(self.mapToScene(view_pos))
+        self._refresh_path_items()
+
+    def _near_first(self, view_pos: QPoint) -> bool:
+        """クリック位置が最初の頂点へ吸着する距離にあるか。
+
+        判定はビュー座標で行う。シーン座標だとズーム倍率で当たり判定の体感が
+        変わってしまうため。
+        """
+        if not self._path_points:
+            return False
+        first = self.mapFromScene(self._path_points[0])
+        return is_within(view_pos, first, style.PATH_CLOSE_THRESHOLD)
+
+    def _refresh_path_items(self) -> None:
+        """打った頂点から、辺と頂点ハンドルの表示を作り直す。"""
+        pts = self._path_points
+        if not pts:
+            return
+        if self._path_item is None:
+            pen = QPen(style.PATH_COLOR, style.PATH_PEN_WIDTH)
+            pen.setCosmetic(True)  # ズームしても線幅を一定に保つ
+            self._path_item = QGraphicsPathItem()
+            self._path_item.setPen(pen)
+            self._path_item.setBrush(QBrush(Qt.NoBrush))
+            self._path_item.setZValue(style.Z_PATH)
+            self._scene.addItem(self._path_item)
+
+        path = QPainterPath(pts[0])
+        for pt in pts[1:]:
+            path.lineTo(pt)
+        self._path_item.setPath(path)
+        self._sync_path_handles()
+
+    def _sync_path_handles(self) -> None:
+        """頂点ハンドルの個数と位置を頂点列に合わせる。"""
+        pts = self._path_points
+        while len(self._path_handles) < len(pts):
+            size = style.PATH_VERTEX_SIZE
+            item = QGraphicsRectItem(-size / 2.0, -size / 2.0, size, size)
+            # ズームしてもハンドルの見かけの大きさを変えない(拡大時に画面を
+            # 埋め尽くさないため)。位置は setPos で与える。
+            item.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+            item.setPen(QPen(style.PATH_COLOR, 1.0))
+            item.setBrush(QBrush(style.PATH_HANDLE_COLOR))
+            item.setZValue(style.Z_PATH)
+            self._scene.addItem(item)
+            self._path_handles.append(item)
+        while len(self._path_handles) > len(pts):
+            self._scene.removeItem(self._path_handles.pop())
+        for item, pt in zip(self._path_handles, pts):
+            item.setPos(pt)
+
+    def _update_rubber(self, scene_pt: QPointF) -> None:
+        """最終頂点からカーソルへの追従線を引く。頂点が無ければ何もしない。"""
+        if not self._path_points:
+            return
+        if self._path_rubber is None:
+            pen = QPen(style.PATH_RUBBER_COLOR, style.PATH_PEN_WIDTH)
+            pen.setCosmetic(True)
+            pen.setStyle(Qt.DashLine)  # 確定済みの辺と区別する
+            self._path_rubber = QGraphicsLineItem()
+            self._path_rubber.setPen(pen)
+            self._path_rubber.setZValue(style.Z_PATH)
+            self._scene.addItem(self._path_rubber)
+        self._path_rubber.setLine(QLineF(self._path_points[-1], scene_pt))
 
     def _paint_to(self, scene_pt: QPointF) -> None:
         """現在のツールの円をマスクへ焼き込む。前回点から掃引して隙間を埋める。
@@ -475,6 +657,11 @@ class ImageView(QGraphicsView):
             self.setCursor(Qt.ClosedHandCursor)
             event.accept()
             return
+        if self._add_mode and self._is_path_tool and event.button() == Qt.LeftButton:
+            # 頂点の確定は release 側で行う(押しっぱなしで少しずれても飛ばさない)
+            self._press_pos = event.pos()
+            event.accept()
+            return
         if self._add_mode and event.button() == Qt.LeftButton:
             # 追加モード: 左ドラッグで塗る(選択・矩形処理は行わない)
             self._painting = True
@@ -497,18 +684,43 @@ class ImageView(QGraphicsView):
             self._pan_by(delta)
             event.accept()
             return
+        if self._add_mode and self._is_path_tool:
+            self._update_rubber(self.mapToScene(event.pos()))
+            event.accept()
+            return
         if self._add_mode and self._painting:
             self._paint_to(self.mapToScene(event.pos()))
             event.accept()
             return
         super().mouseMoveEvent(event)
 
+    def mouseDoubleClickEvent(self, event) -> None:
+        # ダブルクリックでも閉じられるようにする(1回目のクリックで打たれた頂点は
+        # そのまま活かす。これは各種アノテーションツール共通の挙動)。
+        if self._add_mode and self._is_path_tool and event.button() == Qt.LeftButton:
+            self.close_path()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.MiddleButton and self._panning:
             self._panning = False
             self._pan_origin = None
-            # 追加モード中はブラシカーソルへ戻す
-            self._update_brush_cursor() if self._add_mode else self.unsetCursor()
+            self._apply_cursor()  # 追加モード中は描画用カーソルへ戻す
+            event.accept()
+            return
+
+        if self._add_mode and self._is_path_tool and event.button() == Qt.LeftButton:
+            press_pos = self._press_pos
+            self._press_pos = None
+            # ドラッグしてしまったときは頂点を打たない(誤操作の吸収)
+            if (
+                press_pos is not None
+                and (event.pos() - press_pos).manhattanLength()
+                <= style.CLICK_DRAG_THRESHOLD
+            ):
+                self._add_path_point(press_pos)
             event.accept()
             return
 

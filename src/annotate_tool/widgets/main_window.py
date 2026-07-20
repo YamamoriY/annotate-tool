@@ -103,7 +103,8 @@ class ViewerWindow(QMainWindow):
         make("オーバーレイ", ["V"], self.state.toggle_overlay)
         make("塗り", ["B"], self.state.toggle_fill)
         make("選択解除 / 追加取消", ["Esc"], self._on_escape)
-        make("確定", ["Return", "Enter"], self._confirm_add)
+        make("確定 / パスを閉じる", ["Return", "Enter"], self._confirm_add)
+        make("頂点を取消", ["Ctrl+Z", "Backspace"], self._undo_path_point)
         make("削除", ["Delete"], self._delete_selected)
 
     def _build_side_controls(self) -> None:
@@ -242,9 +243,25 @@ class ViewerWindow(QMainWindow):
         self._painting_started = False
         self._update_top_bar()  # 消し切ったら「確定」を引っ込める
 
+    def _undo_path_point(self) -> None:
+        """作図中のパスの直前の頂点を取り消す。
+
+        編集モードで作図中のときだけ効く。将来アプリ全体の undo を入れるなら、
+        作図中でない場合の分岐をここへ足すこと。
+        """
+        if self.state.add_mode:
+            self.view.undo_path_point()
+
     def _confirm_add(self) -> None:
-        """塗った領域を確定する(新規追加、または修正対象の差し替え)。"""
+        """塗った領域を確定する(新規追加、または修正対象の差し替え)。
+
+        パスを作図中なら、まず「パスを閉じる」を優先する。囲い終える前に確定して
+        しまうと、打った頂点が黙って捨てられるため。
+        """
         if not self.state.add_mode:
+            return
+        if self.view.has_path():
+            self.view.close_path()
             return
         polygons = self.view.painted_polygons()
         if polygons:
@@ -253,7 +270,11 @@ class ViewerWindow(QMainWindow):
 
     def _on_escape(self) -> None:
         # 編集モード中は塗りを破棄して抜ける。通常時は選択解除。
-        if self.state.add_mode:
+        # ただしパスを作図中なら、まずパスだけを捨てる(モードは維持)。塗った内容まで
+        # 巻き添えで消えると、囲み損ねただけで最初からやり直しになるため。
+        if self.state.add_mode and self.view.has_path():
+            self.view.cancel_path()
+        elif self.state.add_mode:
             self.state.cancel_add_mode()
         else:
             self.state.deselect()

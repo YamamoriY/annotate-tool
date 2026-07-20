@@ -10,7 +10,12 @@ from enum import Enum
 
 
 class Tool(Enum):
-    """塗りマスクへの描き方。"""
+    """塗りマスクへの描き方。
+
+    POLYGON も「塗り方の一種」であり、閉じた時点でマスクへ焼かれる。頂点そのものは
+    保持しないため、確定後はブラシで塗ったものと区別がつかない。
+    """
 
     BRUSH = "brush"  # 塗る
     ERASER = "eraser"  # 消す
+    POLYGON = "polygon"  # 頂点をクリックして囲んだ範囲を塗る

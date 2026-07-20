@@ -32,9 +32,12 @@ uv run annotate-tool [path/to/instances.json]
 | 選択インスタンスを修正 | E(または上部の「修正」ボタン。単一選択のときだけ) |
 | インスタンス追加(開始) | A(または上部の「追加」ボタン。未選択のときだけ) |
 | 追加モードで塗る / 消す | 左ドラッグ(左上で選んだブラシ / 消しゴム) |
+| パスで頂点を打つ | 左クリック(ツールパネルで「パス」を選ぶ) |
+| パスを閉じる | 最初の頂点をクリック、ダブルクリック、または Enter |
+| 直前の頂点を取消 | Ctrl+Z(または Backspace) |
 | ツール切替・太さ | 左上のツールパネル(追加モード中のみ) |
 | 追加を確定 | Enter(または塗り始めると出る「確定」ボタン) |
-| 追加を取消 | Esc(または追加中に出る「キャンセル」ボタン) |
+| 追加を取消 | Esc(または追加中に出る「キャンセル」ボタン)。パスを作図中は、まずパスだけが取り消される |
 
 ## 構成
 
@@ -42,7 +45,7 @@ uv run annotate-tool [path/to/instances.json]
 src/annotate_tool/
 ├── app.py            # エントリポイント(引数解析・起動)
 ├── coco_data.py      # GUI 非依存の COCO データモデル / IO
-├── tools.py          # 描画ツールの識別子(Tool.BRUSH / Tool.ERASER)
+├── tools.py          # 描画ツールの識別子(Tool.BRUSH / ERASER / POLYGON)
 ├── state.py          # ViewerState: アプリ状態の一元管理(single source of truth)
 ├── style.py          # 色・スタイル・レイアウト定数
 └── widgets/
@@ -53,7 +56,7 @@ src/annotate_tool/
     ├── control_group.py   # 見出し付きボタングループ(移動 / 表示)
     ├── action_bar.py      # 浮動アクションバー(選択解除 / 修正 / 削除)
     ├── add_bar.py         # 浮動バー(追加 / キャンセル / 確定)。塗りつぶしで新規追加
-    ├── tool_panel.py      # 左上の浮動パネル(ブラシ / 消しゴムのトグルと太さ)
+    ├── tool_panel.py      # 左上の浮動パネル(ブラシ / 消しゴム / パスのトグルと太さ)
     └── brush_slider.py    # 太さスライダー(tool_panel の各行に並ぶ)
 ```
 

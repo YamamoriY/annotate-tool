@@ -2,11 +2,12 @@
 
     [ブラシ ]  [====○==  12]
     [消しゴム]  [==○====  16]
+    [パス   ]  [クリックで頂点 / 最初の点で閉じる]
 
-ボタンは排他トグル(常にどちらか一方が ON)、右のスライダーはそのツールの太さ。
-太さはツールごとに独立して保持する。`FloatingActionBar` と同様に親ビューへ重ね、
-リサイズ追従も自身で行う。外部との接点は toolChanged / radiusChanged と
-set_active のみ。
+ボタンは排他トグル(常にどれか1つが ON)、右のスライダーはそのツールの太さ。
+太さはツールごとに独立して保持する。パスは太さを持たないためスライダーの代わりに
+操作ヒントを置く。`FloatingActionBar` と同様に親ビューへ重ね、リサイズ追従も自身で
+行う。外部との接点は toolChanged / radiusChanged と set_active のみ。
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
     QAbstractScrollArea,
     QButtonGroup,
     QGridLayout,
+    QLabel,
     QPushButton,
     QWidget,
 )
@@ -48,19 +50,27 @@ class ToolPanel(QWidget):
         self._buttons: dict[Tool, QPushButton] = {}
         self._sliders: dict[Tool, BrushSlider] = {}
 
+        # 半径が None のツールは太さを持たない(パス)。スライダーの代わりに
+        # 操作ヒントを置く。
         rows = (
             (Tool.BRUSH, "🖌 ブラシ", style.BRUSH_RADIUS),
             (Tool.ERASER, "🧽 消しゴム", style.ERASER_RADIUS),
+            (Tool.POLYGON, "⬡ パス", None),
         )
         for row, (tool, text, radius) in enumerate(rows):
             button = self._make_button(text, tool)
+            layout.addWidget(button, row, 0)
+            self._buttons[tool] = button
+            if radius is None:
+                hint = QLabel(style.PATH_HINT_TEXT, self)
+                hint.setStyleSheet(style.CONTROL_HELP_QSS)
+                layout.addWidget(hint, row, 1)
+                continue
             slider = BrushSlider(radius, self)
             slider.radiusChanged.connect(
                 lambda r, t=tool: self.radiusChanged.emit(t, r)
             )
-            layout.addWidget(button, row, 0)
             layout.addWidget(slider, row, 1)
-            self._buttons[tool] = button
             self._sliders[tool] = slider
 
         self._buttons[Tool.BRUSH].setChecked(True)
@@ -89,7 +99,9 @@ class ToolPanel(QWidget):
         return Tool.BRUSH
 
     def radius(self, tool: Tool) -> float:
-        return self._sliders[tool].radius()
+        """そのツールの太さ。太さを持たないツールでは 0 を返す。"""
+        slider = self._sliders.get(tool)
+        return slider.radius() if slider is not None else 0.0
 
     def set_tool(self, tool: Tool) -> None:
         """外部からツールを切り替える(シグナルは出さない)。"""

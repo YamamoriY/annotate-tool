@@ -1,8 +1,9 @@
 """画像ビューの上部中央に浮かぶアクションバー。
 
-選択中だけ表示し、「選択解除」と「削除」を横並びに並べる。親ビューのリサイズへの
-追従(イベントフィルタ)も自身で行い、ウィンドウ側にはレイアウトの都合を漏らさない。
-外部との接点は deselectClicked / deleteClicked シグナルと set_active のみ。
+選択中だけ表示し、「選択解除」「修正」「削除」を横並びに並べる。「修正」は形を
+塗り直せる単一選択のときだけ出す。親ビューのリサイズへの追従(イベントフィルタ)も
+自身で行い、ウィンドウ側にはレイアウトの都合を漏らさない。外部との接点は
+deselectClicked / editClicked / deleteClicked シグナルと set_active のみ。
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ class FloatingActionBar(QWidget):
     """選択中のみ表示するオーバーレイのボタン列。"""
 
     deselectClicked = Signal()
+    editClicked = Signal()
     deleteClicked = Signal()
 
     def __init__(self, view: QAbstractScrollArea):
@@ -30,10 +32,14 @@ class FloatingActionBar(QWidget):
         self._deselect_btn = self._make_button(
             "✕ 選択解除 (Esc)", style.DESELECT_BUTTON_QSS, self.deselectClicked
         )
+        self._edit_btn = self._make_button(
+            "✎ 修正 (E)", style.ADD_BUTTON_QSS, self.editClicked
+        )
         self._delete_btn = self._make_button(
             "🗑 削除 (Delete)", style.DELETE_BUTTON_QSS, self.deleteClicked
         )
         layout.addWidget(self._deselect_btn)
+        layout.addWidget(self._edit_btn)
         layout.addWidget(self._delete_btn)
 
         self.adjustSize()
@@ -57,9 +63,14 @@ class FloatingActionBar(QWidget):
             self._reposition()
         return super().eventFilter(obj, event)
 
-    def set_active(self, active: bool) -> None:
-        """選択状態に応じて表示/非表示を切り替える。"""
+    def set_active(self, active: bool, can_edit: bool = False) -> None:
+        """選択状態に応じて表示/非表示を切り替える。
+
+        can_edit(単一選択)のときだけ「修正」を出す。複数選択では、どれを塗り
+        直すのか決まらないため隠す。
+        """
         if active:
+            self._edit_btn.setVisible(can_edit)
             self.adjustSize()
             self._reposition()
             self.show()

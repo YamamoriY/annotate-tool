@@ -125,6 +125,25 @@ def test_add_annotation_persists_on_save(coco_json: Path):
     assert new_ann.area == 16.0
 
 
+def test_update_annotation_replaces_shape_and_persists(coco_json: Path):
+    ds = CocoDataset(coco_json)
+    ann = next(a for a in ds.annotations if a.id == 10)
+    ds.update_annotation(ann, [[0, 0, 20, 0, 20, 20, 0, 20]])
+
+    assert ann.bbox == [0, 0, 20, 20]  # 幾何は引き直される
+    assert ann.area == 400.0
+    assert ann.id == 10  # id とカテゴリは保つ
+    assert ann.category_id == 1
+
+    ds.save()
+    ds2 = CocoDataset(coco_json)
+    reloaded = next(a for a in ds2.annotations if a.id == 10)
+    assert reloaded.segmentation == [[0, 0, 20, 0, 20, 20, 0, 20]]
+    assert reloaded.area == 400.0
+    # 件数は増えていない(差し替えであって追加ではない)
+    assert len(ds2.annotations) == len(ds.annotations)
+
+
 def test_annotation_polygons():
     ann = Annotation(
         id=1,

@@ -149,6 +149,24 @@ class CocoDataset:
         )
         return ann
 
+    def update_annotation(
+        self, ann: Annotation, segmentation: list[list[float]]
+    ) -> None:
+        """既存アノテーションの形状を差し替える(bbox / area も引き直す)。
+
+        id・category_id・その他のフィールドは保つ。生の dict 側も同じ id を探して
+        書き換えるため、この後 save() すればそのまま JSON へ反映される。
+        """
+        ann.segmentation = segmentation
+        ann.bbox = _bbox_of(segmentation)
+        ann.area = _area_of(segmentation)
+        for raw in self._raw.get("annotations", []):
+            if raw.get("id") == ann.id:
+                raw["segmentation"] = segmentation
+                raw["bbox"] = ann.bbox
+                raw["area"] = ann.area
+                break
+
     def delete_annotations(self, annotations: list[Annotation]) -> None:
         """指定したアノテーション群を削除し、画像索引を張り直す。"""
         targets = {id(ann) for ann in annotations}

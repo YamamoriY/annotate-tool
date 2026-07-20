@@ -39,6 +39,8 @@ class ViewerState(QObject):
         self._overlay_visible = True
         self._fill_visible = True
         self._add_mode = False
+        # 修正中のインスタンス index(新規追加中は None)
+        self._edit_index: int | None = None
 
     # --- 参照系 -------------------------------------------------------------
     @property
@@ -66,7 +68,13 @@ class ViewerState(QObject):
 
     @property
     def add_mode(self) -> bool:
+        """塗りつぶし編集モード中か(新規追加・既存修正のどちらも含む)。"""
         return self._add_mode
+
+    @property
+    def edit_index(self) -> int | None:
+        """修正中のインスタンス index。新規追加中・非編集中は None。"""
+        return self._edit_index
 
     def current_image(self) -> ImageEntry | None:
         if not self._dataset.images:
@@ -128,32 +136,67 @@ class ViewerState(QObject):
     def deselect(self) -> None:
         self._apply(set())
 
-    # --- 追加(塗りつぶし)モード --------------------------------------------
+    # --- 塗りつぶし編集モード(新規追加 / 既存修正)----------------------------
     def enter_add_mode(self) -> None:
         """新規インスタンスを塗って追加するモードへ入る(選択は解除される)。"""
         if self._add_mode:
             return
+        self._edit_index = None
         self._add_mode = True
         self._apply(set())  # 選択があれば解除(selectionChanged を出す)
         self.addModeChanged.emit(True)
 
+    def enter_edit_mode(self, index: int) -> None:
+        """既存インスタンスの形を塗り直すモードへ入る。
+
+        追加モードとの違いは、確定時に新規追加ではなく差し替えになる点だけ。
+        選択はいったん解除し(暗幕や強調が編集の邪魔になるため)、モードを抜けた
+        ときに元へ戻す。
+        """
+        if self._add_mode or not self._valid(index):
+            return
+        self._edit_index = index
+        self._add_mode = True
+        self._apply(set())
+        self.addModeChanged.emit(True)
+
     def cancel_add_mode(self) -> None:
-        """追加モードを抜ける(塗った内容の確定/破棄は呼び出し側の責務)。"""
+        """編集モードを抜ける(塗った内容の確定/破棄は呼び出し側の責務)。
+
+        修正モードだった場合は、対象インスタンスの選択を復帰させる。
+        """
         if not self._add_mode:
             return
+        index = self._edit_index
+        self._edit_index = None
         self._add_mode = False
         self.addModeChanged.emit(False)
+        if index is not None and self._valid(index):
+            self._apply({index})
 
-    def add_painted(self, polygons: list[list[float]]) -> bool:
-        """塗ってできたポリゴン列を新規アノテーションとしてメモリに追加する。
+    def editing_annotation(self) -> Annotation | None:
+        """修正中のアノテーション(新規追加中・非編集中は None)。"""
+        if self._edit_index is None or not self._valid(self._edit_index):
+            return None
+        return self.current_annotations()[self._edit_index]
 
-        追加できたら True。現在画像がない/ポリゴンが空なら何もせず False。
+    def apply_painted(self, polygons: list[list[float]]) -> bool:
+        """塗ってできたポリゴン列を確定する。
+
+        修正モードなら対象アノテーションの形を差し替え、そうでなければ新規追加する。
+        反映できたら True。現在画像がない/ポリゴンが空なら何もせず False。
         ディスク保存はここでは行わず saveRequested を出す(呼び出し側が遅延保存する)。
         """
         image = self.current_image()
         if image is None or not polygons:
             return False
-        self._dataset.add_annotation(image.id, polygons)
+        target = self.editing_annotation()
+        if self._edit_index is not None and target is None:
+            return False  # 修正中に対象が失われた(通常は起きない)
+        if target is not None:
+            self._dataset.update_annotation(target, polygons)
+        else:
+            self._dataset.add_annotation(image.id, polygons)
         self.annotationsChanged.emit()
         self.saveRequested.emit()
         return True

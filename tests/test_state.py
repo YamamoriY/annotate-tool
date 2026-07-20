@@ -19,6 +19,7 @@ class StubDataset:
     anns: dict[int, list[Annotation]] = field(default_factory=dict)
     saved: bool = False
     added: list[Annotation] = field(default_factory=list)
+    updated: list[Annotation] = field(default_factory=list)
 
     def annotations_for(self, image_id: int) -> list[Annotation]:
         return self.anns.get(image_id, [])
@@ -43,6 +44,12 @@ class StubDataset:
         self.anns.setdefault(image_id, []).append(ann)
         self.added.append(ann)
         return ann
+
+    def update_annotation(
+        self, ann: Annotation, segmentation: list[list[float]]
+    ) -> None:
+        ann.segmentation = segmentation
+        self.updated.append(ann)
 
     def save(self) -> None:
         self.saved = True
@@ -202,7 +209,7 @@ def test_empty_dataset_is_safe():
     assert state.selected_indices == ()
 
 
-# --- 追加(塗りつぶし)モード -----------------------------------------------
+# --- 塗りつぶし編集モード(新規追加 / 既存修正)-------------------------------
 def test_enter_and_cancel_add_mode(dataset: StubDataset):
     state = ViewerState(dataset)
     changes: list[bool] = []
@@ -230,7 +237,7 @@ def test_enter_add_mode_clears_selection(dataset: StubDataset):
     assert selections[-1] == ()  # 選択解除が通知される
 
 
-def test_add_painted_adds_to_memory_and_requests_save(dataset: StubDataset):
+def test_apply_painted_adds_to_memory_and_requests_save(dataset: StubDataset):
     state = ViewerState(dataset)
     refreshed: list[int] = []
     save_reqs: list[int] = []
@@ -238,7 +245,7 @@ def test_add_painted_adds_to_memory_and_requests_save(dataset: StubDataset):
     state.saveRequested.connect(lambda: save_reqs.append(1))
 
     polygons = [[0, 0, 10, 0, 10, 10, 0, 10]]
-    ok = state.add_painted(polygons)
+    ok = state.apply_painted(polygons)
     assert ok is True
     assert len(dataset.added) == 1
     assert dataset.added[0].image_id == 1
@@ -252,11 +259,67 @@ def test_add_painted_adds_to_memory_and_requests_save(dataset: StubDataset):
     assert dataset.saved is True
 
 
-def test_add_painted_ignores_empty(dataset: StubDataset):
+def test_apply_painted_ignores_empty(dataset: StubDataset):
     state = ViewerState(dataset)
     save_reqs: list[int] = []
     state.saveRequested.connect(lambda: save_reqs.append(1))
-    assert state.add_painted([]) is False
+    assert state.apply_painted([]) is False
     assert dataset.saved is False
     assert dataset.added == []
     assert save_reqs == []
+
+
+# --- 修正(既存インスタンスの塗り直し)----------------------------------------
+def test_enter_edit_mode_tracks_target_and_clears_selection(dataset: StubDataset):
+    state = ViewerState(dataset)
+    selections: list[tuple] = []
+    state.selectionChanged.connect(selections.append)
+
+    state.select(1)
+    state.enter_edit_mode(1)
+    assert state.add_mode is True
+    assert state.edit_index == 1
+    assert state.editing_annotation() is dataset.anns[1][1]
+    assert state.selected_indices == ()  # 編集中は選択を外す
+    assert selections[-1] == ()
+
+
+def test_enter_edit_mode_ignores_invalid_index(dataset: StubDataset):
+    state = ViewerState(dataset)
+    state.enter_edit_mode(99)
+    assert state.add_mode is False
+    assert state.edit_index is None
+
+
+def test_cancel_edit_mode_restores_selection(dataset: StubDataset):
+    state = ViewerState(dataset)
+    state.enter_edit_mode(1)
+    state.cancel_add_mode()
+    assert state.add_mode is False
+    assert state.edit_index is None
+    assert state.selected_indices == (1,)  # 修正をやめたら元の選択へ戻る
+
+
+def test_apply_painted_replaces_shape_when_editing(dataset: StubDataset):
+    state = ViewerState(dataset)
+    target = dataset.anns[1][1]
+    state.enter_edit_mode(1)
+
+    polygons = [[0, 0, 5, 0, 5, 5, 0, 5]]
+    assert state.apply_painted(polygons) is True
+    assert dataset.updated == [target]  # 差し替えであって
+    assert dataset.added == []  # 新規追加ではない
+    assert target.segmentation == polygons
+
+
+def test_apply_painted_adds_new_after_leaving_edit_mode(dataset: StubDataset):
+    """修正を抜けた後の確定は、また新規追加に戻る。"""
+    state = ViewerState(dataset)
+    state.enter_edit_mode(1)
+    state.cancel_add_mode()
+
+    state.enter_add_mode()
+    assert state.edit_index is None
+    assert state.apply_painted([[0, 0, 1, 0, 1, 1]]) is True
+    assert len(dataset.added) == 1
+    assert dataset.updated == []

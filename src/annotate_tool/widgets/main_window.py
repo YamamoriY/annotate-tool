@@ -98,6 +98,7 @@ class ViewerWindow(QMainWindow):
         make("前", ["Left"], self.state.prev_image)
         make("次", ["Right", "D", "Space"], self.state.next_image)
         make("追加", ["A"], self._on_add_shortcut)
+        make("修正", ["E"], self._edit_selected)
         make("フィット", ["F"], self.view.fit)
         make("オーバーレイ", ["V"], self.state.toggle_overlay)
         make("塗り", ["B"], self.state.toggle_fill)
@@ -137,6 +138,7 @@ class ViewerWindow(QMainWindow):
         self.view.paintCleared.connect(self._on_paint_cleared)
         self.panel.selectionChanged.connect(self._on_panel_selection)
         self.action_bar.deselectClicked.connect(self.state.deselect)
+        self.action_bar.editClicked.connect(self._edit_selected)
         self.action_bar.deleteClicked.connect(self._delete_selected)
         self.add_bar.addClicked.connect(self.state.enter_add_mode)
         self.add_bar.cancelClicked.connect(self.state.cancel_add_mode)
@@ -191,17 +193,25 @@ class ViewerWindow(QMainWindow):
     def _apply_selection(self, indices) -> None:
         self.view.set_selection(indices)
         self.panel.set_selection(indices)
-        self.action_bar.set_active(bool(indices))
+        # 「修正」は単一選択のときだけ(どれを塗り直すか決まるのはそのときだけ)
+        self.action_bar.set_active(bool(indices), can_edit=len(indices) == 1)
         self._update_top_bar()
 
-    # --- 追加(塗りつぶし)モード --------------------------------------------
+    # --- 塗りつぶし編集モード(新規追加 / 既存修正)----------------------------
     def _on_add_mode_changed(self, active: bool) -> None:
-        self.view.set_add_mode(active)
-        # 追加中は一覧・サイドパネルの操作(選択・画像送り)を止める
+        # 修正モードなら、対象の形をマスクへ焼いた状態でビューを立ち上げる
+        edit_index = self.state.edit_index
+        self.view.set_add_mode(
+            active,
+            edit_index=edit_index,
+            edit_annotation=self.state.editing_annotation(),
+        )
+        # 編集中は一覧・サイドパネルの操作(選択・画像送り)を止める
         self.panel.setEnabled(not active)
         self.side_panel.setEnabled(not active)
         if active:
-            self._painting_started = False
+            # 修正は既に塗られた状態から始まるので、最初から「確定」を出す
+            self._painting_started = edit_index is not None
             # 入り口は必ずブラシ。前回の消しゴムのまま入ると、空のマスクを
             # 消そうとして何も起きず戸惑うため。
             self.tool_panel.set_tool(Tool.BRUSH)
@@ -214,6 +224,16 @@ class ViewerWindow(QMainWindow):
         if not self.state.add_mode and not self.state.selected_indices:
             self.state.enter_add_mode()
 
+    def _edit_selected(self) -> None:
+        """選択中の1件を塗り直すモードへ入る。
+
+        E キーからも呼ばれるため、「修正」ボタンが出ている状況(編集中でなく
+        単一選択)に限る。
+        """
+        indices = self.state.selected_indices
+        if not self.state.add_mode and len(indices) == 1:
+            self.state.enter_edit_mode(indices[0])
+
     def _on_paint_started(self) -> None:
         self._painting_started = True
         self._update_top_bar()  # 塗り始めたら「確定」を出す
@@ -223,16 +243,16 @@ class ViewerWindow(QMainWindow):
         self._update_top_bar()  # 消し切ったら「確定」を引っ込める
 
     def _confirm_add(self) -> None:
-        """塗った領域を新規インスタンスとして確定する(追加モード時のみ)。"""
+        """塗った領域を確定する(新規追加、または修正対象の差し替え)。"""
         if not self.state.add_mode:
             return
         polygons = self.view.painted_polygons()
         if polygons:
-            self.state.add_painted(polygons)
+            self.state.apply_painted(polygons)
         self.state.cancel_add_mode()
 
     def _on_escape(self) -> None:
-        # 追加モード中は塗りを破棄して抜ける。通常時は選択解除。
+        # 編集モード中は塗りを破棄して抜ける。通常時は選択解除。
         if self.state.add_mode:
             self.state.cancel_add_mode()
         else:

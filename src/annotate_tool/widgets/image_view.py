@@ -86,6 +86,8 @@ class ImageView(QGraphicsView):
         self._paint_item: _MaskItem | None = None  # マスクを表示するアイテム
         self._add_dim_item: QGraphicsRectItem | None = None
         self._last_paint_pt: QPointF | None = None
+        # 修正中に隠しているポリゴンアイテム(モードを抜けたら戻す)
+        self._hidden_items: list[QGraphicsPolygonItem] = []
         self._tool = Tool.BRUSH
         # 半径はツールごとに独立。スライダーで変わり、モードを跨いでも保持する。
         self._radii = {
@@ -120,6 +122,7 @@ class ImageView(QGraphicsView):
             for item in items:
                 self._scene.removeItem(item)
         self._items_by_index = []
+        self._hidden_items = []  # 作り直すので隠し中の参照も捨てる
         self._show_fill = show_fill
         self._selected = set()
         if self._dim_item is not None:
@@ -225,9 +228,19 @@ class ImageView(QGraphicsView):
             self._update_brush_cursor()  # 倍率が変わったのでブラシ円を作り直す
 
     # --- 追加(塗りつぶし)モード --------------------------------------------
-    def set_add_mode(self, active: bool) -> None:
-        """塗りつぶしモードの ON/OFF。ON で全体に暗幕をかけブラシカーソルにする。"""
+    def set_add_mode(
+        self,
+        active: bool,
+        edit_index: int | None = None,
+        edit_annotation: Annotation | None = None,
+    ) -> None:
+        """塗りつぶしモードの ON/OFF。ON で全体に暗幕をかけブラシカーソルにする。
+
+        修正対象(index とその Annotation)を渡すと、その形をマスクへ焼いた状態で
+        始まる。元のポリゴンは塗りと二重に見えるため隠す。
+        """
         self._clear_paint()
+        self._restore_hidden()
         self._add_mode = active
         self._painting = False
         self._paint_started = False
@@ -250,11 +263,49 @@ class ImageView(QGraphicsView):
                 self._paint_item = _MaskItem(self._mask_image)
                 self._paint_item.setZValue(style.Z_PAINT)
                 self._scene.addItem(self._paint_item)
+                if edit_annotation is not None and edit_index is not None:
+                    self._prefill_mask(edit_index, edit_annotation)
             self.setDragMode(QGraphicsView.NoDrag)
             self._update_brush_cursor()
         else:
             self.setDragMode(QGraphicsView.RubberBandDrag)
             self.unsetCursor()
+
+    def _prefill_mask(self, index: int, ann: Annotation) -> None:
+        """修正対象の形をマスクへ焼き、元のポリゴン表示を隠す。
+
+        既に「塗った」状態から始めるので `_paint_started` を立てる。スリバー判定の
+        基準も最小半径にしておく(既存の細い部分を確定時に落とさないため)。
+        """
+        if self._mask_image is None:
+            return
+        painter = QPainter(self._mask_image)
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(style.PAINT_COLOR))
+        for pts in ann.polygons():
+            painter.drawPolygon(QPolygonF([QPointF(x, y) for x, y in pts]))
+        painter.end()
+
+        self._paint_started = True
+        self._min_paint_radius = style.BRUSH_RADIUS_MIN
+        self._hide_instance(index)
+        if self._paint_item is not None:
+            self._paint_item.update()
+
+    def _hide_instance(self, index: int) -> None:
+        """修正中は元のポリゴンを隠す(塗りと二重に見えるのを防ぐ)。"""
+        if not 0 <= index < len(self._items_by_index):
+            return
+        for item in self._items_by_index[index]:
+            self._hidden_items.append(item)
+            item.setVisible(False)
+
+    def _restore_hidden(self) -> None:
+        for item in self._hidden_items:
+            item.setVisible(True)
+        self._hidden_items = []
 
     def set_tool(self, tool: Tool) -> None:
         """描画ツール(ブラシ / 消しゴム)を切り替える。"""

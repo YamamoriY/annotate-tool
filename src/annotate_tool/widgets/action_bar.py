@@ -21,7 +21,7 @@ class FloatingActionBar(QWidget):
     editClicked = Signal()
     deleteClicked = Signal()
 
-    def __init__(self, view: QAbstractScrollArea):
+    def __init__(self, view: QAbstractScrollArea, keymap: shortcuts.Keymap):
         super().__init__(view)
         self._view = view
 
@@ -30,13 +30,17 @@ class FloatingActionBar(QWidget):
         layout.setSpacing(style.FLOATING_BUTTON_SPACING)
 
         self._deselect_btn = self._make_button(
-            shortcuts.ESCAPE.text("✕"), style.DESELECT_BUTTON_QSS, self.deselectClicked
+            keymap.text(shortcuts.ESCAPE, "✕"),
+            style.DESELECT_BUTTON_QSS,
+            self.deselectClicked,
         )
         self._edit_btn = self._make_button(
-            shortcuts.EDIT.text("✎"), style.ADD_BUTTON_QSS, self.editClicked
+            keymap.text(shortcuts.EDIT, "✎"), style.ADD_BUTTON_QSS, self.editClicked
         )
         self._delete_btn = self._make_button(
-            shortcuts.DELETE.text("🗑"), style.DELETE_BUTTON_QSS, self.deleteClicked
+            keymap.text(shortcuts.DELETE, "🗑"),
+            style.DELETE_BUTTON_QSS,
+            self.deleteClicked,
         )
         layout.addWidget(self._deselect_btn)
         layout.addWidget(self._edit_btn)

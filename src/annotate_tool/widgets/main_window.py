@@ -12,14 +12,16 @@
 
 from __future__ import annotations
 
-from PySide6.QtGui import QAction, QKeySequence, QPixmap
+from pathlib import Path
+
+from PySide6.QtGui import QAction, QDesktopServices, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
     QStatusBar,
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QUrl
 
 from annotate_tool import settings, shortcuts, style
 from annotate_tool.coco_data import CocoDataset
@@ -35,10 +37,24 @@ from annotate_tool.widgets.tool_panel import ToolPanel
 
 
 class ViewerWindow(QMainWindow):
+    # ショートカットと、それが選ぶ描画ツール(ツールパネルの並びと同じ順)
+    _TOOL_SHORTCUTS = (
+        (shortcuts.TOOL_BRUSH, Tool.BRUSH),
+        (shortcuts.TOOL_ERASER, Tool.ERASER),
+        (shortcuts.TOOL_POLYGON, Tool.POLYGON),
+    )
+
     def __init__(self, dataset: CocoDataset):
         super().__init__()
         self.state = ViewerState(dataset, self)
         self.settings = settings.load()
+        # キー割り当ては設定ファイルで差し替えられる。壊れた行は既定へ戻し、
+        # 理由は起動後にステータスバーへ出す(起動は止めない)。
+        self.keymap, self._keymap_problems = shortcuts.resolve(
+            settings.shortcut_overrides(self.settings)
+        )
+        # 何が書けるのか分かるよう、未記載の項目を既定値で書き出しておく
+        settings.write_missing_shortcuts(self.settings, self.keymap.as_settings())
         self._did_initial_fit = False
         self._painting_started = False  # 追加モードで塗り始めたか(上部ボタン制御用)
         self._save_dirty = False  # 未保存の変更があるか(遅延保存用)
@@ -50,9 +66,10 @@ class ViewerWindow(QMainWindow):
 
         self.view = ImageView(self)
         self.setCentralWidget(self.view)
-        self.action_bar = FloatingActionBar(self.view)
-        self.add_bar = AddBar(self.view)
-        self.tool_panel = ToolPanel(self.view)  # 左上。追加モード中だけ出す
+        self.action_bar = FloatingActionBar(self.view, self.keymap)
+        self.add_bar = AddBar(self.view, self.keymap)
+        # 左上。追加モード中だけ出す
+        self.tool_panel = ToolPanel(self.view, self.keymap)
 
         self.panel = InstancePanel(self)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.panel)
@@ -78,6 +95,13 @@ class ViewerWindow(QMainWindow):
         else:
             self.statusBar().showMessage("画像がありません")
 
+        if self._keymap_problems:
+            # 黙って既定へ戻すと「設定したのに効かない」と受け取られるため必ず出す。
+            # 画像の読み込みより後に出して、こちらを残す。
+            self.statusBar().showMessage(
+                "ショートカット設定: " + " / ".join(self._keymap_problems)
+            )
+
         self._update_top_bar()  # 起動時は「追加」を表示
 
     def showEvent(self, event) -> None:
@@ -99,7 +123,7 @@ class ViewerWindow(QMainWindow):
 
         def make(shortcut: shortcuts.Shortcut, slot) -> QAction:
             action = QAction(shortcut.label, self)
-            action.setShortcuts([QKeySequence(k) for k in shortcut.keys])
+            action.setShortcuts([QKeySequence(k) for k in self.keymap.keys(shortcut)])
             action.triggered.connect(slot)
             self.addAction(action)  # ツールバー未追加でもショートカットを有効にする
             self._actions[shortcut.id] = action
@@ -117,6 +141,9 @@ class ViewerWindow(QMainWindow):
         make(shortcuts.CONFIRM, self._confirm_add)
         make(shortcuts.UNDO_POINT, self._undo_path_point)
         make(shortcuts.DELETE, self._delete_selected)
+        for shortcut, tool in self._TOOL_SHORTCUTS:
+            # triggered は checked を渡してくるので受け流す
+            make(shortcut, lambda _checked=False, t=tool: self._select_tool(t))
 
         # 「その操作がいま可能か」の唯一の出どころ。
         # キー(QAction の有効/無効)もボタンの表示もここだけを見る。以前は同じ条件を
@@ -143,6 +170,9 @@ class ViewerWindow(QMainWindow):
             ),
             shortcuts.DELETE.id: lambda: bool(self.state.selected_indices),
         }
+        # ツールの持ち替えは、ツールパネルが出ている追加モード中だけ
+        for shortcut, _tool in self._TOOL_SHORTCUTS:
+            self._enabled[shortcut.id] = lambda: self.state.add_mode
 
     def _can(self, shortcut: shortcuts.Shortcut) -> bool:
         """その操作がいま可能か。判断は `_enabled` の1箇所だけが持つ。"""
@@ -163,8 +193,8 @@ class ViewerWindow(QMainWindow):
         nav = ControlGroup("画像の移動")
         nav.add_row(
             [
-                (shortcuts.PREV.text(prefix="◀"), self.state.prev_image),
-                (shortcuts.NEXT.text(suffix="▶"), self.state.next_image),
+                (self.keymap.text(shortcuts.PREV, prefix="◀"), self.state.prev_image),
+                (self.keymap.text(shortcuts.NEXT, suffix="▶"), self.state.next_image),
             ]
         )
         self.side_panel.add_widget(nav)
@@ -176,12 +206,12 @@ class ViewerWindow(QMainWindow):
         self.side_panel.add_widget(guide)
 
         display = ControlGroup("表示")
-        display.add_button(shortcuts.FIT.text(), self.view.fit)
+        display.add_button(self.keymap.text(shortcuts.FIT), self.view.fit)
         self._overlay_btn = display.add_button(
-            shortcuts.OVERLAY.text(), self.state.toggle_overlay, checkable=True
+            self.keymap.text(shortcuts.OVERLAY), self.state.toggle_overlay, checkable=True
         )
         self._fill_btn = display.add_button(
-            shortcuts.FILL.text(), self.state.toggle_fill, checkable=True
+            self.keymap.text(shortcuts.FILL), self.state.toggle_fill, checkable=True
         )
         self._overlay_btn.setChecked(self.state.overlay_visible)
         self._fill_btn.setChecked(self.state.fill_visible)
@@ -205,7 +235,24 @@ class ViewerWindow(QMainWindow):
         self._confirm_delete_box.toggled.connect(
             lambda checked: settings.set_confirm_delete(self.settings, checked)
         )
+        setting_group.add_button("キーボードショートカット設定", self._open_settings_folder)
         self.side_panel.add_widget_bottom(setting_group)
+
+    def _open_settings_folder(self) -> None:
+        """設定ファイルの置き場をエクスプローラーで開く。
+
+        キー割り当ての変更は INI を直接編集する方式なので、まずファイルへ
+        たどり着けることが要る(パスを覚えている人はいない)。
+
+        ファイルではなくフォルダを開くのは、INI に紐づくアプリが環境によって
+        違い、開いた先が編集できるとは限らないため。
+        """
+        settings.flush(self.settings)  # 未書き出しのまま開くと空フォルダに見える
+        folder = Path(self.settings.fileName()).parent
+        folder.mkdir(parents=True, exist_ok=True)
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder))):
+            # 開けなくても、パスさえ分かれば手でたどれる
+            self.statusBar().showMessage(f"設定フォルダを開けません: {folder}")
 
     def _connect_signals(self) -> None:
         # ユーザー操作 -> 状態
@@ -337,6 +384,18 @@ class ViewerWindow(QMainWindow):
             self.view.set_tool(entry)
         self.tool_panel.set_active(active)
         self._update_top_bar()
+
+    def _select_tool(self, tool: Tool) -> None:
+        """ツールを持ち替える(1/2/3 キー)。
+
+        パネルのボタンを押したときと同じ状態にするため、パネルとビューの両方へ
+        伝える。ToolPanel.set_tool はシグナルを出さないので、ビューへは自分で
+        渡す必要がある。
+        """
+        if not self._can(shortcuts.TOOL_BRUSH):  # 3つとも条件は同じ(追加モード中)
+            return
+        self.tool_panel.set_tool(tool)
+        self.view.set_tool(tool)
 
     def _entry_tool(self) -> Tool:
         """編集モードに入るときのツール。前回の選択を引き継ぐ。

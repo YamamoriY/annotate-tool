@@ -25,7 +25,7 @@ class AddBar(QWidget):
     cancelClicked = Signal()
     confirmClicked = Signal()
 
-    def __init__(self, view: QAbstractScrollArea):
+    def __init__(self, view: QAbstractScrollArea, keymap: shortcuts.Keymap):
         super().__init__(view)
         self._view = view
 
@@ -34,16 +34,18 @@ class AddBar(QWidget):
         layout.setSpacing(style.FLOATING_BUTTON_SPACING)
 
         self._add_btn = self._make_button(
-            shortcuts.ADD.text("＋"), style.ADD_BUTTON_QSS, self.addClicked
+            keymap.text(shortcuts.ADD, "＋"), style.ADD_BUTTON_QSS, self.addClicked
         )
         # Esc は通常時の「選択解除」と同じキー。追加モード中は言葉だけ変える。
         self._cancel_btn = self._make_button(
-            shortcuts.ESCAPE.text("✕", label="キャンセル"),
+            keymap.text(shortcuts.ESCAPE, "✕", label="キャンセル"),
             style.CANCEL_BUTTON_QSS,
             self.cancelClicked,
         )
         self._confirm_btn = self._make_button(
-            shortcuts.CONFIRM.text("✓"), style.CONFIRM_BUTTON_QSS, self.confirmClicked
+            keymap.text(shortcuts.CONFIRM, "✓"),
+            style.CONFIRM_BUTTON_QSS,
+            self.confirmClicked,
         )
         # 表示順: 追加 / キャンセル / 確定(同時に出るのは後ろ2つだけ)
         self._widgets = (self._add_btn, self._cancel_btn, self._confirm_btn)

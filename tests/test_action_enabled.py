@@ -11,7 +11,7 @@ import pytest
 from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QApplication
 
-from annotate_tool import shortcuts
+from annotate_tool import shortcuts, style
 from annotate_tool.coco_data import Annotation, ImageEntry
 from annotate_tool.widgets.main_window import ViewerWindow
 
@@ -122,6 +122,36 @@ def test_confirm_needs_something_to_confirm(window):
     window.view.cancel_path()
     assert not enabled(window, shortcuts.CONFIRM)
     assert window.state.add_mode, "確定できないだけで、モードは維持される"
+
+
+def test_tool_shortcuts_only_work_in_add_mode(window):
+    """1/2/3 はツールパネルが出ている追加モード中だけ。"""
+    for shortcut, _tool in ViewerWindow._TOOL_SHORTCUTS:
+        assert not enabled(window, shortcut)
+    window.state.enter_add_mode()
+    for shortcut, _tool in ViewerWindow._TOOL_SHORTCUTS:
+        assert enabled(window, shortcut)
+
+
+def test_tool_shortcut_updates_panel_and_view(window):
+    """ToolPanel.set_tool はシグナルを出さないので、ビューへは別途伝える必要がある。
+
+    片方だけ更新すると、パネルの表示と実際の描画がずれる。
+    """
+    window.state.enter_add_mode()
+    for shortcut, tool in ViewerWindow._TOOL_SHORTCUTS:
+        window._select_tool(tool)
+        assert window.tool_panel.tool() is tool, shortcut.id
+        assert window.view._tool is tool, shortcut.id
+
+
+def test_tool_button_labels_fit(window):
+    """ラベルにキー表記が付くため、固定幅に収まるか確かめる。
+
+    溢れても Qt は省略記号へ潰すだけで、エラーにはならない。
+    """
+    for button in window.tool_panel._buttons.values():
+        assert button.sizeHint().width() <= style.TOOL_BUTTON_WIDTH, button.text()
 
 
 def test_undo_point_follows_the_drawn_path(window):

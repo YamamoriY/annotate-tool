@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from annotate_tool import style
+from annotate_tool import shortcuts, style
 from annotate_tool.tools import Tool
 from annotate_tool.widgets.brush_slider import BrushSlider
 
@@ -33,7 +33,7 @@ class ToolPanel(QWidget):
     toolChanged = Signal(object)  # Tool
     radiusChanged = Signal(object, float)  # (Tool, 半径)
 
-    def __init__(self, view: QAbstractScrollArea):
+    def __init__(self, view: QAbstractScrollArea, keymap: shortcuts.Keymap):
         super().__init__(view)
         self._view = view
         # ビューのブラシ円カーソルを継承しないよう、パネル上は通常の矢印に戻す。
@@ -53,9 +53,13 @@ class ToolPanel(QWidget):
         # 半径が None のツールは太さを持たない(パス)。スライダーの代わりに
         # 操作ヒントを置く。
         rows = (
-            (Tool.BRUSH, "🖌 ブラシ", style.BRUSH_RADIUS),
-            (Tool.ERASER, "🧽 消しゴム", style.ERASER_RADIUS),
-            (Tool.POLYGON, "⬡ パス", None),
+            (Tool.BRUSH, keymap.text(shortcuts.TOOL_BRUSH, "🖌"), style.BRUSH_RADIUS),
+            (
+                Tool.ERASER,
+                keymap.text(shortcuts.TOOL_ERASER, "🧽"),
+                style.ERASER_RADIUS,
+            ),
+            (Tool.POLYGON, keymap.text(shortcuts.TOOL_POLYGON, "⬡"), None),
         )
         for row, (tool, text, radius) in enumerate(rows):
             button = self._make_button(text, tool)

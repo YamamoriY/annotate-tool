@@ -175,7 +175,10 @@ QPushButton:pressed { background-color: rgba(20, 20, 20, 230); }
 """
 
 # ツールパネル(追加モード中に画像ビュー左上へ浮かべる。余白は他の浮動バーと共通)。
-TOOL_BUTTON_WIDTH = 96
+# 幅は最長の「🧽 消しゴム (2)」の sizeHint に合わせる(枠と余白込みで 160px)。
+# 足りないと Qt は文字を省略記号へ潰すだけで、黙って読めなくなる。
+# ラベルにはキー表記が付くので、設定で長いキーを割り当てると溢れうる。
+TOOL_BUTTON_WIDTH = 160
 # トグルボタン。選択中(checked)を明るく塗って ON を一目で分かるようにする。
 TOOL_BUTTON_QSS = """
 QPushButton {

@@ -95,11 +95,14 @@ class ViewerWindow(QMainWindow):
         キーと動作名は表側が持つ。ここが決めるのは「どれが何を呼ぶか」だけ。
         """
 
+        self._actions: dict[str, QAction] = {}
+
         def make(shortcut: shortcuts.Shortcut, slot) -> QAction:
             action = QAction(shortcut.label, self)
             action.setShortcuts([QKeySequence(k) for k in shortcut.keys])
             action.triggered.connect(slot)
             self.addAction(action)  # ツールバー未追加でもショートカットを有効にする
+            self._actions[shortcut.id] = action
             return action
 
         # ショートカットのみ(ボタンはビュー上の浮動バーが担う)。
@@ -114,6 +117,42 @@ class ViewerWindow(QMainWindow):
         make(shortcuts.CONFIRM, self._confirm_add)
         make(shortcuts.UNDO_POINT, self._undo_path_point)
         make(shortcuts.DELETE, self._delete_selected)
+
+        # 「その操作がいま可能か」の唯一の出どころ。
+        # キー(QAction の有効/無効)もボタンの表示もここだけを見る。以前は同じ条件を
+        # スロット側とボタン側で別々に書いていたため、片方だけ直すと食い違った。
+        # ここに無いものは常に可能(フィット・表示切替・Esc)。
+        self._enabled = {
+            # 編集モード中の画像送りは禁止(送ってしまうと塗りかけが失われる)
+            shortcuts.PREV.id: lambda: not self.state.add_mode,
+            shortcuts.NEXT.id: lambda: not self.state.add_mode,
+            shortcuts.ADD.id: lambda: (
+                not self.state.add_mode and not self.state.selected_indices
+            ),
+            # 塗り直す対象が決まるのは単一選択のときだけ
+            shortcuts.EDIT.id: lambda: (
+                not self.state.add_mode and len(self.state.selected_indices) == 1
+            ),
+            shortcuts.CONFIRM.id: lambda: self.state.add_mode,
+            shortcuts.UNDO_POINT.id: lambda: (
+                self.state.add_mode and self.view.has_path()
+            ),
+            shortcuts.DELETE.id: lambda: bool(self.state.selected_indices),
+        }
+
+    def _can(self, shortcut: shortcuts.Shortcut) -> bool:
+        """その操作がいま可能か。判断は `_enabled` の1箇所だけが持つ。"""
+        predicate = self._enabled.get(shortcut.id)
+        return predicate() if predicate else True
+
+    def _update_actions(self) -> None:
+        """各ショートカットの有効/無効を現在の状態から決め直す。
+
+        無効な QAction はキーを押しても発火しないため、スロット側で条件を
+        再確認する必要はない(ボタンからも呼ばれるものだけ `_can` で門を残す)。
+        """
+        for shortcut in shortcuts.ALL:
+            self._actions[shortcut.id].setEnabled(self._can(shortcut))
 
     def _build_side_controls(self) -> None:
         """右パネルに「画像の移動」と「表示」の操作グループを積む。"""
@@ -171,6 +210,8 @@ class ViewerWindow(QMainWindow):
         self.view.backgroundClicked.connect(self.state.deselect)
         self.view.paintStarted.connect(self._on_paint_started)
         self.view.paintCleared.connect(self._on_paint_cleared)
+        # 頂点の増減で「頂点を取消」の可否が変わる(マウス操作で起きるため通知が要る)
+        self.view.pathChanged.connect(self._update_actions)
         self.panel.selectionChanged.connect(self._on_panel_selection)
         self.action_bar.deselectClicked.connect(self.state.deselect)
         self.action_bar.editClicked.connect(self._edit_selected)
@@ -236,7 +277,8 @@ class ViewerWindow(QMainWindow):
         self.view.set_selection(indices)
         self.panel.set_selection(indices)
         # 「修正」は単一選択のときだけ(どれを塗り直すか決まるのはそのときだけ)
-        self.action_bar.set_active(bool(indices), can_edit=len(indices) == 1)
+        self._update_actions()
+        self.action_bar.set_active(bool(indices), can_edit=self._can(shortcuts.EDIT))
         self._update_top_bar()
         self._area_count_label.setText(f"{len(indices)}件" if indices else "")
         if not indices and not self._area_syncing:
@@ -303,19 +345,13 @@ class ViewerWindow(QMainWindow):
         return Tool.BRUSH if tool is Tool.ERASER else tool
 
     def _on_add_shortcut(self) -> None:
-        # A キーは「追加」ボタンが出ているとき(通常時・未選択)だけ有効にする
-        if not self.state.add_mode and not self.state.selected_indices:
+        if self._can(shortcuts.ADD):
             self.state.enter_add_mode()
 
     def _edit_selected(self) -> None:
-        """選択中の1件を塗り直すモードへ入る。
-
-        E キーからも呼ばれるため、「修正」ボタンが出ている状況(編集中でなく
-        単一選択)に限る。
-        """
-        indices = self.state.selected_indices
-        if not self.state.add_mode and len(indices) == 1:
-            self.state.enter_edit_mode(indices[0])
+        """選択中の1件を塗り直すモードへ入る。"""
+        if self._can(shortcuts.EDIT):
+            self.state.enter_edit_mode(self.state.selected_indices[0])
 
     def _on_paint_started(self) -> None:
         self._painting_started = True
@@ -328,10 +364,10 @@ class ViewerWindow(QMainWindow):
     def _undo_path_point(self) -> None:
         """作図中のパスの直前の頂点を取り消す。
 
-        編集モードで作図中のときだけ効く。将来アプリ全体の undo を入れるなら、
+        作図中のときだけ効く。将来アプリ全体の undo を入れるなら、
         作図中でない場合の分岐をここへ足すこと。
         """
-        if self.state.add_mode:
+        if self._can(shortcuts.UNDO_POINT):
             self.view.undo_path_point()
 
     def _confirm_add(self) -> None:
@@ -340,7 +376,7 @@ class ViewerWindow(QMainWindow):
         パスを作図中なら、まず「パスを閉じる」を優先する。囲い終える前に確定して
         しまうと、打った頂点が黙って捨てられるため。
         """
-        if not self.state.add_mode:
+        if not self._can(shortcuts.CONFIRM):
             return
         if self.view.has_path():
             self.view.close_path()
@@ -372,12 +408,13 @@ class ViewerWindow(QMainWindow):
         - 追加モード中: 常に「キャンセル」、塗り始めたら「確定」も並べる。
         - 通常時: 未選択なら「追加」、選択中(範囲選択含む)は「追加」を隠す。
         """
+        self._update_actions()
         if self.state.add_mode:
             self.add_bar.show_adding(self._painting_started)
-        elif self.state.selected_indices:
-            self.add_bar.hide_all()
-        else:
+        elif self._can(shortcuts.ADD):
             self.add_bar.show_add()
+        else:
+            self.add_bar.hide_all()
 
     # --- 遅延保存 -----------------------------------------------------------
     def _schedule_save(self) -> None:
@@ -427,9 +464,9 @@ class ViewerWindow(QMainWindow):
             self.view.center_on_instance(rows[0])
 
     def _delete_selected(self) -> None:
-        count = len(self.state.selected_indices)
-        if count == 0:
+        if not self._can(shortcuts.DELETE):
             return
+        count = len(self.state.selected_indices)
         if not self._confirm_delete_box.isChecked():
             self.state.delete_selected()
             return

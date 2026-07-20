@@ -63,6 +63,10 @@ class ImageView(QGraphicsView):
     paintStarted = Signal()
     # 消しゴムで塗りが全部消えた(確定できるものが無くなった)
     paintCleared = Signal()
+    # 作図中のパスの頂点が増減した(has_path() の結果が変わりうる)。
+    # 頂点はマウス操作で増減するため、これが無いとウィンドウ側は
+    # 「取消できるか」を知る手段が無い。
+    pathChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -444,7 +448,10 @@ class ImageView(QGraphicsView):
         if self._path_points:
             self._refresh_path_items()
         else:
-            self._clear_path()  # 全部消えたら作図前の状態へ戻す
+            # 全部消えたら作図前の状態へ戻す。この時点で既に空なので
+            # _clear_path は通知を出さない(下でまとめて出す)。
+            self._clear_path()
+        self.pathChanged.emit()
 
     def close_path(self) -> bool:
         """作図中のパスを閉じ、囲んだ範囲をマスクへ焼く。閉じられたら True。
@@ -481,6 +488,7 @@ class ImageView(QGraphicsView):
 
     def _clear_path(self) -> None:
         """作図中のパスの一時アイテムをすべて捨てる。マスクには触れない。"""
+        had_points = bool(self._path_points)
         self._path_points = []
         while self._path_handles:
             self._scene.removeItem(self._path_handles.pop())
@@ -489,6 +497,8 @@ class ImageView(QGraphicsView):
             if item is not None:
                 self._scene.removeItem(item)
                 setattr(self, attr, None)
+        if had_points:
+            self.pathChanged.emit()
 
     def _add_path_point(self, view_pos: QPoint) -> None:
         """クリック位置に頂点を足す。最初の頂点の近くなら代わりに閉じる。"""
@@ -499,6 +509,7 @@ class ImageView(QGraphicsView):
             return
         self._path_points.append(self.mapToScene(view_pos))
         self._refresh_path_items()
+        self.pathChanged.emit()
 
     def _near_first(self, view_pos: QPoint) -> bool:
         """クリック位置が最初の頂点へ吸着する距離にあるか。

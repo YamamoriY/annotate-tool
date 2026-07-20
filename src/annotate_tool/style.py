@@ -25,7 +25,7 @@ Z_SELECTED = 1.0
 ADD_DIM_ALPHA = 130  # 追加モード中に全体へかける暗幕の濃さ
 # 筆・消しゴムの半径(画像=シーン座標のピクセル)。スライダーで MIN..MAX を動かす。
 BRUSH_RADIUS = 12.0
-ERASER_RADIUS = 16.0
+ERASER_RADIUS = 12.0  # 既定は筆と同じ太さ。別々に調整できるよう値は独立させる
 BRUSH_RADIUS_MIN = 2.0
 BRUSH_RADIUS_MAX = 60.0
 PAINT_COLOR = QColor(90, 220, 150, 150)  # 塗った領域の表示色(半透明)
@@ -93,6 +93,21 @@ QLabel {
     border: none;
 }
 """
+
+# 「画像」グループの中に出す、いま見ている画像の情報。枠は所属するグループが
+# 持つので、ここでは付けない(入れ子の箱になる)。
+INFO_LABEL_QSS = """
+QLabel {
+    color: rgba(255, 255, 255, 230);
+    font-size: 14px;
+    padding: 0 4px;
+    background: transparent;
+    border: none;
+}
+"""
+# 2行目(インスタンス数)。1行目より淡く小さくして、主役をファイル名にする。
+# QSS はラベル全体にしか効かないため、行ごとの差はこの HTML で付ける。
+INFO_SUB_HTML = 'color: rgba(255, 255, 255, 150); font-size: 12px;'
 
 # 操作説明などの補助テキスト(見出しより淡く、少し小さめ)。
 CONTROL_HELP_QSS = """

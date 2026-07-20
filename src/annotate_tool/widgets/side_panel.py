@@ -6,18 +6,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-
-from PySide6.QtWidgets import (
-    QDockWidget,
-    QHBoxLayout,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QDockWidget, QVBoxLayout, QWidget
 
 from annotate_tool import style
-from annotate_tool.widgets.control_group import make_control_button
 
 
 class SidePanel(QDockWidget):
@@ -38,24 +29,6 @@ class SidePanel(QDockWidget):
             QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable
         )
         self.setMinimumWidth(style.DOCK_MIN_WIDTH)
-
-    def add_button_row(self, specs: Iterable[tuple[str, object]]) -> list[QPushButton]:
-        """(text, slot) の並びを横1行に均等配置して、パネルへ直接置く。
-
-        見出しを付けるほどでもない操作(画像送りなど)向け。ControlGroup を使うと
-        枠と見出しが付いてしまうため、ここでは素のまま置く。
-        """
-        row = QWidget(self)
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(style.FLOATING_BUTTON_SPACING)
-        buttons = []
-        for text, slot in specs:
-            btn = make_control_button(text, slot, row)
-            layout.addWidget(btn)
-            buttons.append(btn)
-        self.add_widget(row)
-        return buttons
 
     def add_widget(self, widget: QWidget) -> None:
         """パネルの内容を上から順に追加する(末尾の伸縮スペースの手前へ挿入)。"""

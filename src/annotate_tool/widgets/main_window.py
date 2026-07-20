@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+from html import escape
 from pathlib import Path
 
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence, QPixmap
@@ -85,8 +86,6 @@ class ViewerWindow(QMainWindow):
         self._saving_label = QLabel()  # 右下の「保存中…」表示(遅延保存)
         self._saving_label.setStyleSheet(style.SAVING_LABEL_QSS)
         self.statusBar().addPermanentWidget(self._saving_label)
-        self._info_label = QLabel()
-        self.statusBar().addPermanentWidget(self._info_label)
 
         self._connect_signals()
 
@@ -189,14 +188,20 @@ class ViewerWindow(QMainWindow):
             self._actions[shortcut.id].setEnabled(self._can(shortcut))
 
     def _build_side_controls(self) -> None:
-        """右パネルに「画像の移動」と「表示」の操作グループを積む。"""
-        # 画像送りは見出しを付けずパネル直下へ(ボタンの文言だけで用が足りる)
-        self.side_panel.add_button_row(
+        """右パネルに現在の画像の情報と、操作グループを積む。"""
+        # 最上段は「いまどの画像か」と、その送り。見る対象と移動手段をまとめる。
+        image_group = ControlGroup("画像")
+        self._info_label = QLabel()
+        self._info_label.setStyleSheet(style.INFO_LABEL_QSS)
+        self._info_label.setWordWrap(True)  # パネル幅では収まらないため折り返す
+        image_group.add_widget(self._info_label)
+        image_group.add_row(
             [
                 (self.keymap.text(shortcuts.PREV, prefix="◀"), self.state.prev_image),
                 (self.keymap.text(shortcuts.NEXT, suffix="▶"), self.state.next_image),
             ]
         )
+        self.side_panel.add_widget(image_group)
 
         guide = ControlGroup("操作方法")
         guide.add_text("左ドラッグ： 範囲選択")
@@ -228,7 +233,8 @@ class ViewerWindow(QMainWindow):
 
         setting_group = ControlGroup("設定")
         self._confirm_delete_box = setting_group.add_checkbox(
-            "削除時に確認する", checked=settings.confirm_delete(self.settings)
+            "削除時に確認メッセージを表示",
+            checked=settings.confirm_delete(self.settings),
         )
         # 切り替えた時点で書き出す(終了時にまとめて書くと、強制終了で失われる)
         self._confirm_delete_box.toggled.connect(
@@ -318,10 +324,14 @@ class ViewerWindow(QMainWindow):
         self.panel.set_annotations(annotations, dataset.category_name)
 
         if image is not None:
+            # 横長のステータスバーではなく縦長のパネルに出すため、行で分ける
+            # (1行目=どの画像か、2行目=その中身)。行ごとに見た目を変えるので
+            # HTML で組む。ファイル名は任意の文字列なのでエスケープする。
             self._info_label.setText(
-                f"{image.file_name}   "
-                f"[{self.state.image_index + 1}/{len(dataset.images)}]   "
-                f"インスタンス数: {len(annotations)}"
+                f"<b>{escape(image.file_name)}</b> "
+                f"[{self.state.image_index + 1}/{len(dataset.images)}]"
+                f"<br><span style='{style.INFO_SUB_HTML}'>"
+                f"インスタンス数: {len(annotations)}</span>"
             )
 
     def _apply_selection(self, indices) -> None:
@@ -379,9 +389,9 @@ class ViewerWindow(QMainWindow):
         if active:
             # 修正は既に塗られた状態から始まるので、最初から「確定」を出す
             self._painting_started = edit_index is not None
-            entry = self._entry_tool()
-            self.tool_panel.set_tool(entry)
-            self.view.set_tool(entry)
+            # 前回使ったツールをそのまま引き継ぐ(ツールパネルはモードを抜けても
+            # 選択状態を保持しているので、そこから読む)
+            self.view.set_tool(self.tool_panel.tool())
         self.tool_panel.set_active(active)
         self._update_top_bar()
 
@@ -396,16 +406,6 @@ class ViewerWindow(QMainWindow):
             return
         self.tool_panel.set_tool(tool)
         self.view.set_tool(tool)
-
-    def _entry_tool(self) -> Tool:
-        """編集モードに入るときのツール。前回の選択を引き継ぐ。
-
-        引き継ぐのは「描く側」(ブラシ / パス)だけ。消しゴムのまま入ると、まだ何も
-        塗られていないマスクを消そうとして何も起きず戸惑うため、ブラシへ戻す。
-        ツールパネルはモードを抜けても選択状態を保持しているので、そこから読む。
-        """
-        tool = self.tool_panel.tool()
-        return Tool.BRUSH if tool is Tool.ERASER else tool
 
     def _on_add_shortcut(self) -> None:
         if self._can(shortcuts.ADD):

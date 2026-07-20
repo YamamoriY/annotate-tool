@@ -23,29 +23,6 @@ from PySide6.QtWidgets import (
 from annotate_tool import style
 
 
-def make_control_button(
-    text: str,
-    slot,
-    parent: QWidget | None = None,
-    *,
-    checkable: bool = False,
-) -> QPushButton:
-    """パネルに置くボタンを作る。
-
-    グループの内と外(パネル直下)の両方から使うため、ここに切り出してある。
-    見た目とフォーカスの扱いを1箇所に持たせないと、片方だけ直したときに
-    「このボタンだけフォーカスを奪う」といった差が生まれる。
-    """
-    btn = QPushButton(text, parent)
-    btn.setCursor(Qt.PointingHandCursor)
-    # フォーカスを奪わせない(奪うと一覧へフォーカスが移り自動選択が起きるため)。
-    btn.setFocusPolicy(Qt.NoFocus)
-    btn.setStyleSheet(style.CONTROL_BUTTON_QSS)
-    btn.setCheckable(checkable)
-    btn.clicked.connect(slot)
-    return btn
-
-
 class ControlGroup(QWidget):
     """見出し付きのボタングループ(枠 + 半透明背景)。"""
 
@@ -82,6 +59,14 @@ class ControlGroup(QWidget):
             buttons.append(btn)
         self._outer.addLayout(row)
         return buttons
+
+    def add_widget(self, widget: QWidget) -> None:
+        """任意のウィジェットを1つ、縦に積んで追加する。
+
+        用意された行(ボタン・説明・スライダー)に当てはまらないものを置くための口。
+        """
+        widget.setParent(self)
+        self._outer.addWidget(widget)
 
     def add_text(self, text: str) -> QLabel:
         """説明用のテキスト行を追加する(操作方法の案内などに使う)。"""
@@ -150,4 +135,11 @@ class ControlGroup(QWidget):
         return slider, note_label
 
     def _make_button(self, text: str, slot, checkable: bool) -> QPushButton:
-        return make_control_button(text, slot, self, checkable=checkable)
+        btn = QPushButton(text, self)
+        btn.setCursor(Qt.PointingHandCursor)
+        # フォーカスを奪わせない(奪うと一覧へフォーカスが移り自動選択が起きるため)。
+        btn.setFocusPolicy(Qt.NoFocus)
+        btn.setStyleSheet(style.CONTROL_BUTTON_QSS)
+        btn.setCheckable(checkable)
+        btn.clicked.connect(slot)
+        return btn

@@ -41,6 +41,8 @@ class ViewerWindow(QMainWindow):
         self._did_initial_fit = False
         self._painting_started = False  # 追加モードで塗り始めたか(上部ボタン制御用)
         self._save_dirty = False  # 未保存の変更があるか(遅延保存用)
+        # 面積スライダー起因の選択変更を処理中か(つまみの巻き戻しと再入を防ぐ)
+        self._area_syncing = False
 
         self.setWindowTitle("COCO Segmentation Viewer")
         self.resize(*style.WINDOW_SIZE)
@@ -131,6 +133,17 @@ class ViewerWindow(QMainWindow):
         self._fill_btn.setChecked(self.state.fill_visible)
         self.side_panel.add_widget(display)
 
+        select = ControlGroup("選択")
+        select.add_text("この面積以下をまとめて選択")
+        self._area_slider = select.add_slider(
+            minimum=0,
+            maximum=style.AREA_SLIDER_STEPS,
+            value=0,
+            formatter=lambda pos: style.format_area(style.area_from_slider(pos)),
+        )
+        self._area_count_label = select.add_text("")
+        self.side_panel.add_widget(select)
+
         settings = ControlGroup("設定")
         self._confirm_delete_box = settings.add_checkbox("削除時に確認する", checked=True)
         self.side_panel.add_widget_bottom(settings)
@@ -151,6 +164,12 @@ class ViewerWindow(QMainWindow):
         self.tool_panel.toolChanged.connect(self.view.set_tool)
         self.tool_panel.radiusChanged.connect(self.view.set_radius)
         self.add_bar.confirmClicked.connect(self._confirm_add)
+        # 面積スライダーは「もう一つの選択ソース」。つまみを動かさず触っただけでも
+        # 選び直せるよう sliderPressed も拾う。
+        self._area_slider.valueChanged.connect(self._on_area_slider)
+        self._area_slider.sliderPressed.connect(
+            lambda: self._on_area_slider(self._area_slider.value())
+        )
 
         # 状態 -> 表示
         self.state.imageChanged.connect(self._load_image)
@@ -202,6 +221,31 @@ class ViewerWindow(QMainWindow):
         # 「修正」は単一選択のときだけ(どれを塗り直すか決まるのはそのときだけ)
         self.action_bar.set_active(bool(indices), can_edit=len(indices) == 1)
         self._update_top_bar()
+        self._area_count_label.setText(f"選択中: {len(indices)} 件" if indices else "")
+        if not indices and not self._area_syncing:
+            # 選択が解除されたらつまみも戻す(残すと、何も選ばれていないのに
+            # 面積を指したままになり表示が嘘になる)。
+            #
+            # ただしスライダー操作の最中は戻さない。しきい値がまだ最小インスタンス
+            # に届いていない間は選択が空になるので、そこで戻すとドラッグ中の
+            # つまみを毎回 0 へ引き戻してしまう。
+            self._area_slider.setValue(0)
+
+    def _on_area_slider(self, pos: int) -> None:
+        """面積スライダーの値を選択へ反映する(既存の選択は置き換える)。
+
+        出来上がるのは普通の複数選択なので、この後クリックで増減させたり
+        Delete したりできる。手で編集した後にまたつまみを動かすと、しきい値から
+        作り直される。
+        """
+        if self.state.add_mode or self._area_syncing:
+            return
+        threshold = style.area_from_slider(pos)
+        self._area_syncing = True
+        try:
+            self.state.set_selection(self.state.indices_with_area_at_most(threshold))
+        finally:
+            self._area_syncing = False
 
     # --- 塗りつぶし編集モード(新規追加 / 既存修正)----------------------------
     def _on_add_mode_changed(self, active: bool) -> None:

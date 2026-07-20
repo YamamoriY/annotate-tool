@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSlider,
     QVBoxLayout,
     QWidget,
 )
@@ -77,6 +78,35 @@ class ControlGroup(QWidget):
         box.setChecked(checked)
         self._outer.addWidget(box)
         return box
+
+    def add_slider(
+        self,
+        *,
+        minimum: int,
+        maximum: int,
+        value: int,
+        formatter: Callable[[int], str],
+    ) -> QSlider:
+        """つまみ + 現在値の行を追加する。
+
+        現在値の表示は formatter(つまみ位置) の文字列で、つまみが動くたびに
+        更新される。返すのは QSlider なので、呼び出し側は valueChanged だけでなく
+        sliderPressed(値が変わらない「触っただけ」)も拾える。
+        """
+        slider = QSlider(Qt.Horizontal, self)
+        slider.setRange(minimum, maximum)
+        slider.setValue(value)
+        # ボタン類と同じく、フォーカスを奪うと一覧へ移って自動選択が起きるため防ぐ。
+        slider.setFocusPolicy(Qt.NoFocus)
+        slider.setCursor(Qt.PointingHandCursor)
+
+        label = QLabel(formatter(value), self)
+        label.setStyleSheet(style.CONTROL_HELP_QSS)
+        slider.valueChanged.connect(lambda v: label.setText(formatter(v)))
+
+        self._outer.addWidget(slider)
+        self._outer.addWidget(label)
+        return slider
 
     def _make_button(self, text: str, slot, checkable: bool) -> QPushButton:
         btn = QPushButton(text, self)

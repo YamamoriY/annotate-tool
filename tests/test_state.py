@@ -323,3 +323,72 @@ def test_apply_painted_adds_new_after_leaving_edit_mode(dataset: StubDataset):
     assert state.apply_painted([[0, 0, 1, 0, 1, 1]]) is True
     assert len(dataset.added) == 1
     assert dataset.updated == []
+
+
+# --- 面積によるしきい値選択 ---------------------------------------------------
+def area_ann(ann_id: int, image_id: int, area: float) -> Annotation:
+    return Annotation(
+        id=ann_id, image_id=image_id, category_id=1, segmentation=[], area=area
+    )
+
+
+@pytest.fixture
+def area_dataset() -> StubDataset:
+    """面積がばらばらで、index 順と面積順が一致しないデータ。"""
+    return StubDataset(
+        images=[
+            ImageEntry(id=1, file_name="a.jpg", width=10, height=10),
+            ImageEntry(id=2, file_name="b.jpg", width=10, height=10),
+        ],
+        anns={
+            1: [
+                area_ann(10, 1, 500.0),  # index 0
+                area_ann(11, 1, 20.0),  # index 1
+                area_ann(12, 1, 100.0),  # index 2
+                area_ann(13, 1, 20.0),  # index 3(同点)
+            ],
+            2: [area_ann(20, 2, 9999.0)],
+        },
+    )
+
+
+def test_area_threshold_selects_small_instances(area_dataset: StubDataset):
+    state = ViewerState(area_dataset)
+    assert sorted(state.indices_with_area_at_most(0)) == []
+    assert sorted(state.indices_with_area_at_most(20)) == [1, 3]  # 境界は含む
+    assert sorted(state.indices_with_area_at_most(100)) == [1, 2, 3]
+    assert sorted(state.indices_with_area_at_most(10_000)) == [0, 1, 2, 3]
+
+
+def test_area_threshold_feeds_normal_selection(area_dataset: StubDataset):
+    """しきい値選択の結果は普通の複数選択であり、後から手で編集できる。"""
+    state = ViewerState(area_dataset)
+    state.set_selection(state.indices_with_area_at_most(100))
+    assert state.selected_indices == (1, 2, 3)
+
+    state.toggle(2)  # 手で1件外す
+    assert state.selected_indices == (1, 3)
+
+    state.deselect()
+    assert state.selected_indices == ()
+
+
+def test_area_index_follows_image_change(area_dataset: StubDataset):
+    """画像を切り替えたら面積索引も作り直される(前の画像の索引が残らない)。"""
+    state = ViewerState(area_dataset)
+    assert sorted(state.indices_with_area_at_most(100)) == [1, 2, 3]
+
+    state.set_image_index(1)
+    assert state.indices_with_area_at_most(100) == []
+    assert state.indices_with_area_at_most(9999) == [0]
+
+
+def test_area_index_follows_deletion(area_dataset: StubDataset):
+    """削除後の索引は、詰め直された index を返す。"""
+    state = ViewerState(area_dataset)
+    state.set_selection([0])  # area 500 のものを消す
+    state.delete_selected()
+
+    # 残りは [20, 100, 20] -> index 0, 1, 2
+    assert sorted(state.indices_with_area_at_most(20)) == [0, 2]
+    assert sorted(state.indices_with_area_at_most(500)) == [0, 1, 2]

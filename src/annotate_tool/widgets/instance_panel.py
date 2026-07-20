@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QItemSelectionModel, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDockWidget,
@@ -60,18 +60,35 @@ class InstancePanel(QDockWidget):
         self._list.blockSignals(False)
 
     def set_selection(self, indices) -> None:
-        """外部からの選択状態の反映。selectionChanged は発火させない。"""
+        """外部からの選択状態の反映。selectionChanged は発火させない。
+
+        全消去してから選び直すのではなく、増減した行だけを触る。面積スライダーの
+        ドラッグ中は毎フレームここへ来るため、1画像に千件近くある状況で
+        全行を走査すると目に見えて重くなる。
+        """
         wanted = set(indices)
-        if wanted == self._selected_rows():
+        current = self._selected_rows()
+        if wanted == current:
             return
         self._list.blockSignals(True)
-        self._list.clearSelection()
-        for row in wanted:
+        self._list.setUpdatesEnabled(False)
+        for row in current - wanted:
+            item = self._list.item(row)
+            if item is not None:
+                item.setSelected(False)
+        for row in wanted - current:
             item = self._list.item(row)
             if item is not None:
                 item.setSelected(True)
         # 代表行(currentItem)も選択内に置く。空なら解除。
-        self._list.setCurrentRow(min(wanted) if wanted else -1)
+        #
+        # NoUpdate 必須。ExtendedSelection では引数1つの setCurrentRow が
+        # アンカーからの範囲選択として働き、今設定した選択を壊してしまう
+        # (3件選んだつもりが2件になる)。ここでは現在行だけを動かしたい。
+        self._list.setCurrentRow(
+            min(wanted) if wanted else -1, QItemSelectionModel.NoUpdate
+        )
+        self._list.setUpdatesEnabled(True)
         self._list.blockSignals(False)
 
     def _selected_rows(self) -> set[int]:

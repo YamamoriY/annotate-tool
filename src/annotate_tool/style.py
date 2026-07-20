@@ -224,6 +224,18 @@ QSlider::sub-page:horizontal {
 }
 """
 
+# --- 面積しきい値スライダー(右パネル「選択」) --------------------------------
+# つまみの位置は 0..AREA_SLIDER_STEPS の整数で、面積[px^2]へは指数で写す。
+# 実データの面積分布が低域へ強く偏っている(中央値 2304 に対し p10 は 31)ため、
+# 線形目盛りでは興味のある範囲がスライダー左端に潰れて操作できない。
+#
+# 範囲はデータの min/max ではなく固定値にする。データに合わせると画像ごとに
+# 同じつまみ位置が違う面積を意味してしまい、「面積指定は画像をまたいで安定する」
+# という利点が失われるため。
+AREA_SLIDER_STEPS = 1000
+AREA_SLIDER_MIN_LOG2 = 0.0  # 1 px^2
+AREA_SLIDER_MAX_LOG2 = 16.0  # 65536 px^2 (相当辺長 256px)
+
 # 「キャンセル」ボタン(追加モード中は常に上部へ表示)。
 CANCEL_BUTTON_QSS = DESELECT_BUTTON_QSS
 
@@ -240,6 +252,23 @@ QPushButton {
 QPushButton:hover { background-color: rgba(55, 165, 105, 235); }
 QPushButton:pressed { background-color: rgba(35, 110, 70, 240); }
 """
+
+
+def area_from_slider(pos: int) -> float:
+    """面積スライダーのつまみ位置[0..AREA_SLIDER_STEPS]を面積[px^2]へ変換する。"""
+    frac = pos / AREA_SLIDER_STEPS
+    span = AREA_SLIDER_MAX_LOG2 - AREA_SLIDER_MIN_LOG2
+    return 2.0 ** (AREA_SLIDER_MIN_LOG2 + frac * span)
+
+
+def format_area(area: float) -> str:
+    """面積を px^2 と相当辺長で表示する。
+
+    px^2 はインスタンス一覧の表示と単位を揃えるため。ただし数値だけでは粒の
+    大きさが掴めないので、同じ面積の正方形の一辺を添える。
+    """
+    side = area**0.5
+    return f"{int(area)} px² (≒{int(side)}px角)"
 
 
 def paint_min_area(radius: float) -> float:

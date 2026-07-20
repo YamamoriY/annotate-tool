@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections.abc import Iterable
 
 from PySide6.QtCore import QObject, Signal
@@ -41,6 +42,12 @@ class ViewerState(QObject):
         self._add_mode = False
         # 修正中のインスタンス index(新規追加中は None)
         self._edit_index: int | None = None
+
+        # 面積昇順の索引(現在画像ぶん)。しきい値選択で使う。作り直しの契機は
+        # 自分のシグナルから拾い、無効化の責任を呼び出し側へ散らさない。
+        self._area_index: tuple[list[float], list[int]] | None = None
+        self.imageChanged.connect(self._invalidate_area_index)
+        self.annotationsChanged.connect(self._invalidate_area_index)
 
     # --- 参照系 -------------------------------------------------------------
     @property
@@ -135,6 +142,31 @@ class ViewerState(QObject):
 
     def deselect(self) -> None:
         self._apply(set())
+
+    # --- 面積によるしきい値選択 ------------------------------------------------
+    def _invalidate_area_index(self) -> None:
+        self._area_index = None
+
+    def _build_area_index(self) -> tuple[list[float], list[int]]:
+        """現在画像のインスタンスを面積の昇順に並べた索引を作る。
+
+        戻り値は (昇順の面積列, 対応する index 列)。面積は COCO の area を
+        そのまま使う(ポリゴンからの再計算はしない)。
+        """
+        if self._area_index is None:
+            pairs = sorted(
+                (ann.area, i) for i, ann in enumerate(self.current_annotations())
+            )
+            self._area_index = ([a for a, _ in pairs], [i for _, i in pairs])
+        return self._area_index
+
+    def indices_with_area_at_most(self, threshold: float) -> list[int]:
+        """面積が threshold 以下のインスタンス index を返す。
+
+        面積昇順の索引を二分探索するので、走査するのは該当ぶんだけで済む。
+        """
+        areas, order = self._build_area_index()
+        return order[: bisect_right(areas, threshold)]
 
     # --- 塗りつぶし編集モード(新規追加 / 既存修正)----------------------------
     def enter_add_mode(self) -> None:

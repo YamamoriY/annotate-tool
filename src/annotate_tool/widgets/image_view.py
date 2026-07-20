@@ -78,6 +78,7 @@ class ImageView(QGraphicsView):
 
         self._pixmap_item: QGraphicsPixmapItem | None = None
         self._dim_item: QGraphicsRectItem | None = None
+        self._dim_forced = False  # 選択が空でも暗幕を出す(面積スライダー操作中)
         # インスタンス番号 -> そのインスタンスを構成するポリゴンアイテム群
         self._items_by_index: list[list[QGraphicsPolygonItem]] = []
         self._show_fill = True
@@ -147,8 +148,10 @@ class ImageView(QGraphicsView):
         self._hidden_items = []  # 作り直すので隠し中の参照も捨てる
         self._show_fill = show_fill
         self._selected = set()
-        if self._dim_item is not None:
-            self._dim_item.setVisible(False)
+        # 画像やインスタンスが入れ替わればスライダー操作の文脈も切れる。ここで
+        # 落としておかないと、押しっぱなしのまま状況が変わったとき暗いまま戻らない。
+        self._dim_forced = False
+        self._update_dim()
 
         for idx, ann in enumerate(annotations):
             color = style.instance_color(idx)
@@ -195,10 +198,24 @@ class ImageView(QGraphicsView):
         for idx in new - self._selected:
             self._restyle(idx, selected=True, raise_z=True)
         self._selected = new
+        self._update_dim()
 
-        # 選択中は非選択部へ暗幕をかける(選択インスタンスは暗幕の上に出る)
+    def set_dim_forced(self, on: bool) -> None:
+        """選択が空でも暗幕をかけたままにする(面積スライダーの操作中に使う)。
+
+        しきい値が最小インスタンスに届くまでは選択が空のままなので、選択の有無だけで
+        暗幕を出し入れすると、つまみを動かし始めた瞬間に画面が明るく戻ってしまう。
+        操作中は暗いままにして、増えていく選択を見比べられるようにする。
+        """
+        if self._dim_forced == on:
+            return
+        self._dim_forced = on
+        self._update_dim()
+
+    def _update_dim(self) -> None:
+        """非選択部の暗幕の出し入れ(選択インスタンスは暗幕の上に出る)。"""
         if self._dim_item is not None:
-            self._dim_item.setVisible(bool(new))
+            self._dim_item.setVisible(bool(self._selected) or self._dim_forced)
 
     def center_on_instance(self, index: int) -> None:
         """指定インスタンスの位置へビューを寄せる。"""

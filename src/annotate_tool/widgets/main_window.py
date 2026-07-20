@@ -167,8 +167,9 @@ class ViewerWindow(QMainWindow):
         # 面積スライダーは「もう一つの選択ソース」。つまみを動かさず触っただけでも
         # 選び直せるよう sliderPressed も拾う。
         self._area_slider.valueChanged.connect(self._on_area_slider)
-        self._area_slider.sliderPressed.connect(
-            lambda: self._on_area_slider(self._area_slider.value())
+        self._area_slider.sliderPressed.connect(self._on_area_slider_pressed)
+        self._area_slider.sliderReleased.connect(
+            lambda: self.view.set_dim_forced(False)
         )
 
         # 状態 -> 表示
@@ -230,6 +231,13 @@ class ViewerWindow(QMainWindow):
             # に届いていない間は選択が空になるので、そこで戻すとドラッグ中の
             # つまみを毎回 0 へ引き戻してしまう。
             self._area_slider.setValue(0)
+
+    def _on_area_slider_pressed(self) -> None:
+        """つまみを掴んだ時点で、動かさなくても選び直す(「触ったら始まる」)。"""
+        if self.state.add_mode:
+            return
+        self.view.set_dim_forced(True)  # 操作中は選択が空でも暗いままにする
+        self._on_area_slider(self._area_slider.value())
 
     def _on_area_slider(self, pos: int) -> None:
         """面積スライダーの値を選択へ反映する(既存の選択は置き換える)。

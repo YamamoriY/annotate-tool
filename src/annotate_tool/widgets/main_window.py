@@ -190,14 +190,13 @@ class ViewerWindow(QMainWindow):
 
     def _build_side_controls(self) -> None:
         """右パネルに「画像の移動」と「表示」の操作グループを積む。"""
-        nav = ControlGroup("画像の移動")
-        nav.add_row(
+        # 画像送りは見出しを付けずパネル直下へ(ボタンの文言だけで用が足りる)
+        self.side_panel.add_button_row(
             [
                 (self.keymap.text(shortcuts.PREV, prefix="◀"), self.state.prev_image),
                 (self.keymap.text(shortcuts.NEXT, suffix="▶"), self.state.next_image),
             ]
         )
-        self.side_panel.add_widget(nav)
 
         guide = ControlGroup("操作方法")
         guide.add_text("左ドラッグ： 範囲選択")
@@ -235,7 +234,8 @@ class ViewerWindow(QMainWindow):
         self._confirm_delete_box.toggled.connect(
             lambda checked: settings.set_confirm_delete(self.settings, checked)
         )
-        setting_group.add_button("キーボードショートカット設定", self._open_settings_folder)
+        # ↗ は「別の場所(エクスプローラー)が開く」ことを示す慣用のしるし
+        setting_group.add_button("キーボードショートカット ↗", self._open_settings_folder)
         self.side_panel.add_widget_bottom(setting_group)
 
     def _open_settings_folder(self) -> None:

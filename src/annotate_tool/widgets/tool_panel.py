@@ -1,13 +1,13 @@
 """画像ビュー左上に浮かぶ、追加モード用のツールパネル。
 
-    [ブラシ ]  [====○==  12]
-    [消しゴム]  [==○====  16]
-    [パス   ]  [クリックで頂点 / 最初の点で閉じる]
+    [ブラシ (1) ]  [====○==  12]
+    [消しゴム (2)]  [==○====  16]
+    [パス (3)   ]
 
 ボタンは排他トグル(常にどれか1つが ON)、右のスライダーはそのツールの太さ。
-太さはツールごとに独立して保持する。パスは太さを持たないためスライダーの代わりに
-操作ヒントを置く。`FloatingActionBar` と同様に親ビューへ重ね、リサイズ追従も自身で
-行う。外部との接点は toolChanged / radiusChanged と set_active のみ。
+太さはツールごとに独立して保持する。パスは太さを持たないため右は空ける。
+`FloatingActionBar` と同様に親ビューへ重ね、リサイズ追従も自身で行う。外部との
+接点は toolChanged / radiusChanged と set_active のみ。
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QAbstractScrollArea,
     QButtonGroup,
     QGridLayout,
-    QLabel,
     QPushButton,
     QWidget,
 )
@@ -50,25 +49,17 @@ class ToolPanel(QWidget):
         self._buttons: dict[Tool, QPushButton] = {}
         self._sliders: dict[Tool, BrushSlider] = {}
 
-        # 半径が None のツールは太さを持たない(パス)。スライダーの代わりに
-        # 操作ヒントを置く。
+        # 半径が None のツールは太さを持たない(パス)。その行はボタンだけ置く。
         rows = (
-            (Tool.BRUSH, keymap.text(shortcuts.TOOL_BRUSH, "🖌"), style.BRUSH_RADIUS),
-            (
-                Tool.ERASER,
-                keymap.text(shortcuts.TOOL_ERASER, "🧽"),
-                style.ERASER_RADIUS,
-            ),
-            (Tool.POLYGON, keymap.text(shortcuts.TOOL_POLYGON, "⬡"), None),
+            (Tool.BRUSH, keymap.text(shortcuts.TOOL_BRUSH), style.BRUSH_RADIUS),
+            (Tool.ERASER, keymap.text(shortcuts.TOOL_ERASER), style.ERASER_RADIUS),
+            (Tool.POLYGON, keymap.text(shortcuts.TOOL_POLYGON), None),
         )
         for row, (tool, text, radius) in enumerate(rows):
             button = self._make_button(text, tool)
             layout.addWidget(button, row, 0)
             self._buttons[tool] = button
             if radius is None:
-                hint = QLabel(style.PATH_HINT_TEXT, self)
-                hint.setStyleSheet(style.CONTROL_HELP_QSS)
-                layout.addWidget(hint, row, 1)
                 continue
             slider = BrushSlider(radius, self)
             slider.radiusChanged.connect(

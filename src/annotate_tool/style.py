@@ -43,7 +43,6 @@ PATH_PEN_WIDTH = 2.0
 PATH_COLOR = QColor(90, 220, 150, 230)  # 確定済みの辺(PAINT_COLOR と同系で濃いめ)
 PATH_HANDLE_COLOR = QColor(255, 255, 255, 230)  # 頂点ハンドルの塗り
 PATH_RUBBER_COLOR = QColor(255, 255, 255, 160)  # 最終頂点→カーソルの追従線
-PATH_HINT_TEXT = "クリックで頂点\n最初の点で閉じる"
 Z_PATH = 4.0  # 作図中のパス(塗りより上)
 
 # --- ビュー操作 -------------------------------------------------------------
@@ -175,10 +174,10 @@ QPushButton:pressed { background-color: rgba(20, 20, 20, 230); }
 """
 
 # ツールパネル(追加モード中に画像ビュー左上へ浮かべる。余白は他の浮動バーと共通)。
-# 幅は最長の「🧽 消しゴム (2)」の sizeHint に合わせる(枠と余白込みで 160px)。
+# 幅は最長の「消しゴム (2)」の sizeHint に合わせる(枠と余白込みで 134px)。
 # 足りないと Qt は文字を省略記号へ潰すだけで、黙って読めなくなる。
 # ラベルにはキー表記が付くので、設定で長いキーを割り当てると溢れうる。
-TOOL_BUTTON_WIDTH = 160
+TOOL_BUTTON_WIDTH = 134
 # トグルボタン。選択中(checked)を明るく塗って ON を一目で分かるようにする。
 TOOL_BUTTON_QSS = """
 QPushButton {
@@ -262,17 +261,6 @@ QSlider::sub-page:horizontal {
 }
 """
 
-# スライダーの現在値(読み取り行の主役。補助テキストより明るく太く)。
-CONTROL_VALUE_QSS = """
-QLabel {
-    color: rgba(255, 255, 255, 235);
-    font-size: 13px;
-    font-weight: bold;
-    padding: 0 4px;
-    background: transparent;
-    border: none;
-}
-"""
 
 # 「キャンセル」ボタン(追加モード中は常に上部へ表示)。
 CANCEL_BUTTON_QSS = DESELECT_BUTTON_QSS

@@ -38,3 +38,22 @@ echo "building: $spec"
 uv run pyinstaller "$spec" --noconfirm --workpath build/mac --distpath dist/mac
 
 echo "done: $out"
+
+# Only the .app is worth zipping - a bare onefile executable can be uploaded as is.
+if [ "$onefile" -eq 1 ]; then
+    exit 0
+fi
+
+# Same single source of truth for the version as build-windows.ps1.
+version=$(sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' pyproject.toml | head -n 1)
+if [ -z "$version" ]; then
+    echo "could not read version from pyproject.toml" >&2
+    exit 1
+fi
+
+# A .app is a directory holding symlinks and permission bits, so it has to be
+# zipped before distribution. ditto preserves them; zip(1) and Finder do not.
+zip="dist/mac/annotate-tool-$version-mac.zip"
+echo "zip: $zip"
+rm -f "$zip"
+ditto -c -k --keepParent "$out" "$zip"

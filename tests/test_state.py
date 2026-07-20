@@ -200,6 +200,18 @@ def test_toggles(dataset: StubDataset):
     assert state.fill_visible is True
 
 
+def test_toggle_blink(dataset: StubDataset):
+    state = ViewerState(dataset)
+    emitted: list[bool] = []
+    state.blinkEnabledChanged.connect(emitted.append)
+
+    assert state.blink_enabled is False  # 既定は OFF
+    state.toggle_blink()
+    state.toggle_blink()
+    assert emitted == [True, False]
+    assert state.blink_enabled is False
+
+
 def test_empty_dataset_is_safe():
     state = ViewerState(StubDataset())
     assert state.current_image() is None

@@ -136,6 +136,7 @@ class ViewerWindow(QMainWindow):
         make(shortcuts.FIT, self.view.fit)
         make(shortcuts.OVERLAY, self.state.toggle_overlay)
         make(shortcuts.FILL, self.state.toggle_fill)
+        make(shortcuts.BLINK, self.state.toggle_blink)
         make(shortcuts.ESCAPE, self._on_escape)
         make(shortcuts.CONFIRM, self._confirm_add)
         make(shortcuts.UNDO_POINT, self._undo_path_point)
@@ -232,8 +233,13 @@ class ViewerWindow(QMainWindow):
         self._fill_btn = display.add_button(
             self.keymap.text(shortcuts.FILL), self.state.toggle_fill, checkable=True
         )
+        # 点滅も「オーバーレイの見せ方」の一つなので、同じ並びの同じ形で置く。
+        self._blink_btn = display.add_button(
+            self.keymap.text(shortcuts.BLINK), self.state.toggle_blink, checkable=True
+        )
         self._overlay_btn.setChecked(self.state.overlay_visible)
         self._fill_btn.setChecked(self.state.fill_visible)
+        self._blink_btn.setChecked(self.state.blink_enabled)
         self.side_panel.add_widget(display)
 
         # 見出しがそのまま操作の説明になっているので、注釈行は置かない。
@@ -360,11 +366,13 @@ class ViewerWindow(QMainWindow):
         self.state.annotationsChanged.connect(self._refresh_overlays)
         self.state.overlayVisibleChanged.connect(self.view.set_overlay_visible)
         self.state.fillVisibleChanged.connect(self.view.set_fill_visible)
+        self.state.blinkEnabledChanged.connect(self.view.set_blink_enabled)
         self.state.addModeChanged.connect(self._on_add_mode_changed)
         self.state.saveRequested.connect(self._schedule_save)
         # トグルボタンの見た目を状態に追従させる(ショートカット操作でも更新される)
         self.state.overlayVisibleChanged.connect(self._overlay_btn.setChecked)
         self.state.fillVisibleChanged.connect(self._fill_btn.setChecked)
+        self.state.blinkEnabledChanged.connect(self._blink_btn.setChecked)
 
     # --- 状態 -> 表示 --------------------------------------------------------
     def _load_image(self, index: int) -> None:

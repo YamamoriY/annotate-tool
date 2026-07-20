@@ -28,6 +28,7 @@ class ViewerState(QObject):
     annotationsChanged = Signal()
     overlayVisibleChanged = Signal(bool)
     fillVisibleChanged = Signal(bool)
+    blinkEnabledChanged = Signal(bool)  # オーバーレイの点滅表示の ON/OFF
     addModeChanged = Signal(bool)  # 追加(塗りつぶし)モードの ON/OFF
     # 未保存の変更が生じた(実際のディスク保存は呼び出し側が遅延して行う)
     saveRequested = Signal()
@@ -41,6 +42,10 @@ class ViewerState(QObject):
         self._selected: set[int] = set()
         self._overlay_visible = True
         self._fill_visible = True
+        # 点滅は常用する見せ方ではなく「今そこを確かめたい」ときの道具なので既定は OFF。
+        # 点滅の位相(いま見えているか)はここには持たない。保存にもテストにも
+        # 関わらない純粋な描画の都合であり、持たせると状態が時間依存になるため。
+        self._blink_enabled = False
         self._add_mode = False
         # 修正中のインスタンス index(新規追加中は None)
         self._edit_index: int | None = None
@@ -89,6 +94,10 @@ class ViewerState(QObject):
     @property
     def fill_visible(self) -> bool:
         return self._fill_visible
+
+    @property
+    def blink_enabled(self) -> bool:
+        return self._blink_enabled
 
     @property
     def add_mode(self) -> bool:
@@ -279,3 +288,7 @@ class ViewerState(QObject):
     def toggle_fill(self) -> None:
         self._fill_visible = not self._fill_visible
         self.fillVisibleChanged.emit(self._fill_visible)
+
+    def toggle_blink(self) -> None:
+        self._blink_enabled = not self._blink_enabled
+        self.blinkEnabledChanged.emit(self._blink_enabled)

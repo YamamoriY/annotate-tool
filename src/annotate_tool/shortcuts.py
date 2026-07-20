@@ -44,6 +44,8 @@ EDIT = Shortcut("edit", "修正", ("E",))
 FIT = Shortcut("fit", "フィット", ("F",))
 OVERLAY = Shortcut("overlay", "オーバーレイ", ("V",))
 FILL = Shortcut("fill", "塗り", ("B",))
+# オーバーレイの見せ方を変える 3 つ(C / V / B)はキーボード上でも隣り合わせにする。
+BLINK = Shortcut("blink", "点滅", ("C",))
 # 通常時は選択解除、追加モード中はモードの取り消し(段階的に効く)。
 ESCAPE = Shortcut("escape", "選択解除", ("Esc",))
 # 作図中はパスを閉じる動作が優先される。Enter も従来どおり効く。
@@ -63,6 +65,7 @@ ALL: tuple[Shortcut, ...] = (
     FIT,
     OVERLAY,
     FILL,
+    BLINK,
     ESCAPE,
     CONFIRM,
     UNDO_POINT,

@@ -11,7 +11,7 @@ import math
 from collections.abc import Iterable
 
 import numpy as np
-from PySide6.QtCore import QLineF, QPoint, QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QLineF, QPoint, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -130,6 +130,15 @@ class ImageView(QGraphicsView):
         self._show_fill = True
         self._selected: set[int] = set()
 
+        # 点滅表示。実際に点滅するかは「ユーザーが有効にしたか」と「塗り編集中で
+        # ないか」の両方で決まるので、二つを別々に持ち _update_blink に集約する。
+        self._blink_enabled = False  # ユーザー設定
+        self._blink_paused = False  # 塗り編集中の一時停止
+        self._blink_on = True  # いまの位相(True = 見えている)
+        self._blink_timer = QTimer(self)
+        self._blink_timer.setInterval(style.BLINK_INTERVAL_MS)
+        self._blink_timer.timeout.connect(self._blink_tick)
+
         # 操作状態
         self._press_pos: QPoint | None = None  # 左押下位置(クリック/ドラッグ判定用)
         self._panning = False  # 中ボタンによるパン中か
@@ -226,6 +235,11 @@ class ImageView(QGraphicsView):
                 self._scene.addItem(item)
                 items.append(item)
             self._items_by_index.append(items)
+
+        # 作り直したアイテムは不透明度が既定(1.0)に戻っているので位相を塗り直す。
+        # これを忘れると、消えている位相での画像送りや追加確定のあと、次の点滅まで
+        # オーバーレイが出たままになる。
+        self._apply_blink()
 
     def _pen_width(self, selected: bool) -> float:
         """本線の幅。塗りを消しているときは境界判定用に太くする。"""
@@ -335,6 +349,47 @@ class ImageView(QGraphicsView):
                 item.set_halo_pen(self._make_halo_pen(selected))
                 item.setBrush(self._make_brush(color, selected))
 
+    # --- 点滅表示 ------------------------------------------------------------
+    def set_blink_enabled(self, enabled: bool) -> None:
+        """オーバーレイの点滅表示を切り替える。"""
+        self._blink_enabled = enabled
+        self._update_blink()
+
+    def _set_blink_paused(self, paused: bool) -> None:
+        """塗り編集中は点滅を止める(基準にしている形が消えると塗りにくい)。"""
+        self._blink_paused = paused
+        self._update_blink()
+
+    def _update_blink(self) -> None:
+        """タイマーと位相を、いまの設定に合わせて整える(点滅まわりの唯一の入口)。
+
+        点滅していない間は必ず位相を「見えている」へ戻す。止めた瞬間がたまたま
+        消えている位相だと、オーバーレイが消えたまま固まってしまうため。
+        """
+        running = self._blink_enabled and not self._blink_paused
+        if running:
+            if not self._blink_timer.isActive():
+                self._blink_timer.start()
+        else:
+            self._blink_timer.stop()
+            self._blink_on = True
+        self._apply_blink()
+
+    def _blink_tick(self) -> None:
+        self._blink_on = not self._blink_on
+        self._apply_blink()
+
+    def _apply_blink(self) -> None:
+        """いまの位相を全オーバーレイへ反映する。
+
+        暗幕(_dim_item)は点滅させない。一緒に消すと、選択中は暗幕だけが残って
+        「何も選んでいない」ように見えてしまう。
+        """
+        opacity = 1.0 if self._blink_on else style.BLINK_OFF_OPACITY
+        for items in self._items_by_index:
+            for item in items:
+                item.setOpacity(opacity)
+
     # --- ズーム / フィット / クリック ---------------------------------------
     def fit(self) -> None:
         if self._pixmap_item is not None:
@@ -366,6 +421,7 @@ class ImageView(QGraphicsView):
         self._painting = False
         self._paint_started = False
         self._last_paint_pt = None
+        self._set_blink_paused(active)
 
         if active:
             if self._pixmap_item is not None:

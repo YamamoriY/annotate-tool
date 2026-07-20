@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from annotate_tool import style
 from annotate_tool.coco_data import Annotation
 from annotate_tool.mask_polygon import mask_to_polygons
+from annotate_tool.tools import Tool
 
 
 class ImageView(QGraphicsView):
@@ -48,6 +49,8 @@ class ImageView(QGraphicsView):
     rectSelected = Signal(object)
     # 追加モードで塗り始めた(最初の一筆)
     paintStarted = Signal()
+    # 消しゴムで塗りが全部消えた(確定できるものが無くなった)
+    paintCleared = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -83,7 +86,12 @@ class ImageView(QGraphicsView):
         self._paint_item: _MaskItem | None = None  # マスクを表示するアイテム
         self._add_dim_item: QGraphicsRectItem | None = None
         self._last_paint_pt: QPointF | None = None
-        self._brush_radius = style.BRUSH_RADIUS  # スライダーで変わる(モード跨ぎで保持)
+        self._tool = Tool.BRUSH
+        # 半径はツールごとに独立。スライダーで変わり、モードを跨いでも保持する。
+        self._radii = {
+            Tool.BRUSH: style.BRUSH_RADIUS,
+            Tool.ERASER: style.ERASER_RADIUS,
+        }
         self._min_paint_radius = style.BRUSH_RADIUS_MAX  # この回で使った最も細い筆
 
     # --- シーン構築 ---------------------------------------------------------
@@ -248,14 +256,27 @@ class ImageView(QGraphicsView):
             self.setDragMode(QGraphicsView.RubberBandDrag)
             self.unsetCursor()
 
-    def set_brush_radius(self, radius: float) -> None:
-        """塗りブラシの半径(画像座標 px)を変える。カーソルの円も追従させる。"""
-        radius = max(style.BRUSH_RADIUS_MIN, min(radius, style.BRUSH_RADIUS_MAX))
-        if radius == self._brush_radius:
+    def set_tool(self, tool: Tool) -> None:
+        """描画ツール(ブラシ / 消しゴム)を切り替える。"""
+        if tool is self._tool:
             return
-        self._brush_radius = radius
+        self._tool = tool
         if self._add_mode:
+            self._update_brush_cursor()  # 太さが変わるのでカーソルを作り直す
+
+    def set_radius(self, tool: Tool, radius: float) -> None:
+        """ツールごとの半径(画像座標 px)を変える。カーソルの円も追従させる。"""
+        radius = max(style.BRUSH_RADIUS_MIN, min(radius, style.BRUSH_RADIUS_MAX))
+        if radius == self._radii[tool]:
+            return
+        self._radii[tool] = radius
+        if self._add_mode and tool is self._tool:
             self._update_brush_cursor()
+
+    @property
+    def _brush_radius(self) -> float:
+        """現在選択中のツールの半径。"""
+        return self._radii[self._tool]
 
     def _update_brush_cursor(self) -> None:
         """ブラシ半径(画像座標)を現在のズーム倍率で画面サイズに直し、
@@ -292,23 +313,29 @@ class ImageView(QGraphicsView):
         self._min_paint_radius = style.BRUSH_RADIUS_MAX
 
     def _paint_to(self, scene_pt: QPointF) -> None:
-        """ブラシ半径の円をマスクへ焼き込む。前回点から掃引して隙間を埋める。
+        """現在のツールの円をマスクへ焼き込む。前回点から掃引して隙間を埋める。
 
-        コンポジションは Source(上書き)・アンチエイリアスなしで塗る。こうすると
-        重ね塗りしても塗った画素のアルファは一定に保たれ、縁のにじみがマスクを削って
-        穴を作ることがない。塗り直した部分だけを update() して再描画コストを抑える。
+        コンポジションはブラシなら Source(上書き)、消しゴムなら Clear(消去)。
+        いずれもアンチエイリアスなしで塗る。こうすると重ね塗りしても塗った画素の
+        アルファは一定に保たれ、縁のにじみがマスクを削って穴を作ることがない。
+        塗り直した部分だけを update() して再描画コストを抑える。
         """
         if self._mask_image is None:
             return
         r = self._brush_radius
-        # スリバー判定の基準は「この回で使った最も細い筆」。太い筆に持ち替えた後でも
-        # 細筆で打った点が捨てられないようにする。
-        self._min_paint_radius = min(self._min_paint_radius, r)
+        if self._tool is Tool.BRUSH:
+            # スリバー判定の基準は「この回で使った最も細い筆」。太い筆に持ち替えた
+            # 後でも細筆で打った点が捨てられないようにする(消しゴムは対象外)。
+            self._min_paint_radius = min(self._min_paint_radius, r)
         last = self._last_paint_pt
 
         painter = QPainter(self._mask_image)
         painter.setRenderHint(QPainter.Antialiasing, False)
-        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.setCompositionMode(
+            QPainter.CompositionMode_Clear
+            if self._tool is Tool.ERASER
+            else QPainter.CompositionMode_Source
+        )
         if last is None:
             painter.setPen(Qt.NoPen)
             painter.setBrush(QBrush(style.PAINT_COLOR))
@@ -337,24 +364,36 @@ class ImageView(QGraphicsView):
             y0, y1 = min(y0, last.y()), max(y1, last.y())
         return QRectF(x0 - pad, y0 - pad, (x1 - x0) + 2 * pad, (y1 - y0) + 2 * pad)
 
+    def _mask_alpha(self) -> np.ndarray | None:
+        """塗りマスクのアルファ面(= 塗りの有無)を numpy 配列として覗く。
+
+        ARGB32 のバッファをそのまま参照する。リトルエンディアンでは各画素は
+        メモリ上 B,G,R,A の順なので、4 バイト目(index 3)がアルファになる。
+        """
+        img = self._mask_image
+        if img is None:
+            return None
+        w, h = img.width(), img.height()
+        if w == 0 or h == 0:
+            return None
+        stride = img.bytesPerLine()
+        buf = np.frombuffer(img.constBits(), dtype=np.uint8, count=stride * h)
+        return buf.reshape(h, stride)[:, 3 : w * 4 : 4]
+
+    def _mask_is_empty(self) -> bool:
+        """マスクに塗り残しが一切ないか。消しゴムを離したときだけ呼ぶ。"""
+        alpha = self._mask_alpha()
+        return alpha is None or not alpha.any()
+
     def painted_polygons(self) -> list[list[float]]:
         """塗ったマスクを COCO polygon 列(画像座標)へ変換して返す。空なら []。
 
         マスクのアルファ面を 2値化し、mask_polygon(OpenCV の輪郭抽出+間引き)へ
         渡すだけ。コストはマスクの大きさで決まり、塗った時間には依存しない。
         """
-        if self._mask_image is None:
+        alpha = self._mask_alpha()
+        if alpha is None:
             return []
-        img = self._mask_image
-        w, h = img.width(), img.height()
-        if w == 0 or h == 0:
-            return []
-
-        # ARGB32 のバッファを numpy で覗く。リトルエンディアンでは各画素は
-        # メモリ上 B,G,R,A の順なので、4 バイト目(index 3)がアルファ = 塗りの有無。
-        stride = img.bytesPerLine()
-        buf = np.frombuffer(img.constBits(), dtype=np.uint8, count=stride * h)
-        alpha = buf.reshape(h, stride)[:, 3 : w * 4 : 4]
         return mask_to_polygons(
             alpha,
             epsilon=style.PAINT_SIMPLIFY_EPSILON,
@@ -389,7 +428,8 @@ class ImageView(QGraphicsView):
             # 追加モード: 左ドラッグで塗る(選択・矩形処理は行わない)
             self._painting = True
             self._paint_to(self.mapToScene(event.pos()))
-            if not self._paint_started:
+            # 「確定」を出すのは塗った後だけ。消しゴムだけ動かしても確定は出さない。
+            if self._tool is Tool.BRUSH and not self._paint_started:
                 self._paint_started = True
                 self.paintStarted.emit()
             event.accept()
@@ -425,6 +465,16 @@ class ImageView(QGraphicsView):
             # 一筆の終わり。塗った内容は保持し、次の筆も同じ領域へ足せる。
             self._painting = False
             self._last_paint_pt = None
+            # 消し切ったなら「塗り始め前」の状態へ戻す(確定を引っ込めるため)。
+            # 全面走査するので、消しゴムを離した瞬間だけに限る。
+            if (
+                self._tool is Tool.ERASER
+                and self._paint_started
+                and self._mask_is_empty()
+            ):
+                self._paint_started = False
+                self._min_paint_radius = style.BRUSH_RADIUS_MAX
+                self.paintCleared.emit()
             event.accept()
             return
 

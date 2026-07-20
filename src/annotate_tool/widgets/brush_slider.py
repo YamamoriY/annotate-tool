@@ -1,8 +1,8 @@
-"""塗りブラシの太さ(半径)を変えるスライダー。
+"""筆・消しゴムの太さ(半径)を変えるスライダー。
 
-追加モード中だけ `AddBar` の中に並べて表示する。値は画像=シーン座標の半径 px で、
-整数刻み(style.BRUSH_RADIUS_MIN..MAX)。外部との接点は radiusChanged と
-radius / set_radius のみ。
+追加モード中だけ `ToolPanel` の各行に並べて表示する。値は画像=シーン座標の
+半径 px で、整数刻み(style.BRUSH_RADIUS_MIN..MAX)。外部との接点は
+radiusChanged と radius / set_radius のみ。
 """
 
 from __future__ import annotations
@@ -14,11 +14,11 @@ from annotate_tool import style
 
 
 class BrushSlider(QWidget):
-    """ブラシ半径のスライダー(ラベル + つまみ + 現在値)。"""
+    """半径のスライダー(つまみ + 現在値)。"""
 
     radiusChanged = Signal(float)
 
-    def __init__(self, parent=None):
+    def __init__(self, value: float = style.BRUSH_RADIUS, parent=None):
         super().__init__(parent)
         self.setStyleSheet(style.BRUSH_SLIDER_QSS)
         # 追加モード中はビューがブラシ円カーソルを持つ。子ウィジェットはそれを
@@ -33,7 +33,7 @@ class BrushSlider(QWidget):
         self._slider.setRange(
             int(style.BRUSH_RADIUS_MIN), int(style.BRUSH_RADIUS_MAX)
         )
-        self._slider.setValue(int(style.BRUSH_RADIUS))
+        self._slider.setValue(int(value))
         self._slider.setFixedWidth(style.BRUSH_SLIDER_WIDTH)
         # ボタン類と同じく、フォーカスを奪うと一覧へ移って自動選択が起きるため防ぐ。
         self._slider.setFocusPolicy(Qt.NoFocus)
@@ -46,7 +46,6 @@ class BrushSlider(QWidget):
         )
         self._value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
-        layout.addWidget(QLabel("太さ", self))
         layout.addWidget(self._slider)
         layout.addWidget(self._value_label)
 

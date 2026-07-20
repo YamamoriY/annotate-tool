@@ -2,11 +2,11 @@
 
 状態に応じて表示を切り替える:
 - 通常時(未選択): 「追加」
-- 追加モード中: ブラシ太さスライダーと「キャンセル (Esc)」。
-  塗り始めた後は「確定 (Enter)」も並ぶ。
+- 追加モード中: 「キャンセル (Esc)」。塗り始めた後は「確定 (Enter)」も並ぶ。
 
+ツールの選択と太さは左上の `ToolPanel` が受け持つ(ここはアクションのみ)。
 `FloatingActionBar` と同様に親ビューへ重ね、リサイズ追従も自身で行う。外部との
-接点は addClicked / cancelClicked / confirmClicked / brushRadiusChanged と
+接点は addClicked / cancelClicked / confirmClicked と
 show_add / show_adding / hide_all のみ。
 """
 
@@ -16,16 +16,14 @@ from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import QAbstractScrollArea, QHBoxLayout, QPushButton, QWidget
 
 from annotate_tool import style
-from annotate_tool.widgets.brush_slider import BrushSlider
 
 
 class AddBar(QWidget):
-    """追加モードの入口(追加)・太さ・キャンセル・確定をまとめた浮動バー。"""
+    """追加モードの入口(追加)・キャンセル・確定をまとめた浮動バー。"""
 
     addClicked = Signal()
     cancelClicked = Signal()
     confirmClicked = Signal()
-    brushRadiusChanged = Signal(float)
 
     def __init__(self, view: QAbstractScrollArea):
         super().__init__(view)
@@ -44,16 +42,8 @@ class AddBar(QWidget):
         self._confirm_btn = self._make_button(
             "✓ 確定 (Enter)", style.CONFIRM_BUTTON_QSS, self.confirmClicked
         )
-        self._brush_slider = BrushSlider(self)
-        self._brush_slider.radiusChanged.connect(self.brushRadiusChanged)
-
-        # 表示順: 追加 / 太さ / キャンセル / 確定(同時に出るのは後ろ3つだけ)
-        self._widgets = (
-            self._add_btn,
-            self._brush_slider,
-            self._cancel_btn,
-            self._confirm_btn,
-        )
+        # 表示順: 追加 / キャンセル / 確定(同時に出るのは後ろ2つだけ)
+        self._widgets = (self._add_btn, self._cancel_btn, self._confirm_btn)
         for w in self._widgets:
             layout.addWidget(w)
             w.hide()
@@ -75,14 +65,11 @@ class AddBar(QWidget):
         self._show_only(self._add_btn)
 
     def show_adding(self, can_confirm: bool) -> None:
-        """追加モード中の表示。太さとキャンセルは常に出し、確定は塗った後だけ。"""
-        shown = [self._brush_slider, self._cancel_btn]
+        """追加モード中の表示。キャンセルは常に出し、確定は塗った後だけ。"""
+        shown = [self._cancel_btn]
         if can_confirm:
             shown.append(self._confirm_btn)
         self._show_only(*shown)
-
-    def brush_radius(self) -> float:
-        return self._brush_slider.radius()
 
     def hide_all(self) -> None:
         self.hide()

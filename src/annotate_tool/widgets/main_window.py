@@ -24,12 +24,14 @@ from PySide6.QtCore import Qt, QTimer
 from annotate_tool import style
 from annotate_tool.coco_data import CocoDataset
 from annotate_tool.state import ViewerState
+from annotate_tool.tools import Tool
 from annotate_tool.widgets.action_bar import FloatingActionBar
 from annotate_tool.widgets.add_bar import AddBar
 from annotate_tool.widgets.control_group import ControlGroup
 from annotate_tool.widgets.image_view import ImageView
 from annotate_tool.widgets.instance_panel import InstancePanel
 from annotate_tool.widgets.side_panel import SidePanel
+from annotate_tool.widgets.tool_panel import ToolPanel
 
 
 class ViewerWindow(QMainWindow):
@@ -47,6 +49,7 @@ class ViewerWindow(QMainWindow):
         self.setCentralWidget(self.view)
         self.action_bar = FloatingActionBar(self.view)
         self.add_bar = AddBar(self.view)
+        self.tool_panel = ToolPanel(self.view)  # 左上。追加モード中だけ出す
 
         self.panel = InstancePanel(self)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.panel)
@@ -131,12 +134,14 @@ class ViewerWindow(QMainWindow):
         self.view.instanceClicked.connect(self._on_instance_clicked)
         self.view.rectSelected.connect(self._on_rect_selected)
         self.view.paintStarted.connect(self._on_paint_started)
+        self.view.paintCleared.connect(self._on_paint_cleared)
         self.panel.selectionChanged.connect(self._on_panel_selection)
         self.action_bar.deselectClicked.connect(self.state.deselect)
         self.action_bar.deleteClicked.connect(self._delete_selected)
         self.add_bar.addClicked.connect(self.state.enter_add_mode)
         self.add_bar.cancelClicked.connect(self.state.cancel_add_mode)
-        self.add_bar.brushRadiusChanged.connect(self.view.set_brush_radius)
+        self.tool_panel.toolChanged.connect(self.view.set_tool)
+        self.tool_panel.radiusChanged.connect(self.view.set_radius)
         self.add_bar.confirmClicked.connect(self._confirm_add)
 
         # 状態 -> 表示
@@ -197,6 +202,11 @@ class ViewerWindow(QMainWindow):
         self.side_panel.setEnabled(not active)
         if active:
             self._painting_started = False
+            # 入り口は必ずブラシ。前回の消しゴムのまま入ると、空のマスクを
+            # 消そうとして何も起きず戸惑うため。
+            self.tool_panel.set_tool(Tool.BRUSH)
+            self.view.set_tool(Tool.BRUSH)
+        self.tool_panel.set_active(active)
         self._update_top_bar()
 
     def _on_add_shortcut(self) -> None:
@@ -207,6 +217,10 @@ class ViewerWindow(QMainWindow):
     def _on_paint_started(self) -> None:
         self._painting_started = True
         self._update_top_bar()  # 塗り始めたら「確定」を出す
+
+    def _on_paint_cleared(self) -> None:
+        self._painting_started = False
+        self._update_top_bar()  # 消し切ったら「確定」を引っ込める
 
     def _confirm_add(self) -> None:
         """塗った領域を新規インスタンスとして確定する(追加モード時のみ)。"""

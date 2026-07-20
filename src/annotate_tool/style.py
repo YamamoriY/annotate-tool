@@ -23,8 +23,9 @@ Z_SELECTED = 1.0
 
 # --- 追加(塗りつぶし)モード -----------------------------------------------
 ADD_DIM_ALPHA = 130  # 追加モード中に全体へかける暗幕の濃さ
-# 塗りブラシの半径(画像=シーン座標のピクセル)。スライダーで MIN..MAX を動かす。
+# 筆・消しゴムの半径(画像=シーン座標のピクセル)。スライダーで MIN..MAX を動かす。
 BRUSH_RADIUS = 12.0
+ERASER_RADIUS = 16.0
 BRUSH_RADIUS_MIN = 2.0
 BRUSH_RADIUS_MAX = 60.0
 PAINT_COLOR = QColor(90, 220, 150, 150)  # 塗った領域の表示色(半透明)
@@ -147,7 +148,27 @@ QPushButton:hover { background-color: rgba(70, 70, 70, 220); }
 QPushButton:pressed { background-color: rgba(20, 20, 20, 230); }
 """
 
-# ブラシ太さスライダー(追加モード中に浮動バーへ並べる)。
+# ツールパネル(追加モード中に画像ビュー左上へ浮かべる。余白は他の浮動バーと共通)。
+TOOL_BUTTON_WIDTH = 96
+# トグルボタン。選択中(checked)を明るく塗って ON を一目で分かるようにする。
+TOOL_BUTTON_QSS = """
+QPushButton {
+    background-color: rgba(40, 40, 40, 200);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 90);
+    border-radius: 14px;
+    padding: 6px 14px;
+    font-size: 13px;
+}
+QPushButton:hover { background-color: rgba(70, 70, 70, 220); }
+QPushButton:checked {
+    background-color: rgba(200, 200, 200, 235);
+    color: rgb(20, 20, 20);
+    border: 1px solid rgba(255, 255, 255, 200);
+}
+"""
+
+# ブラシ太さスライダー(ツールパネルの各行に並べる)。
 BRUSH_SLIDER_WIDTH = 110
 BRUSH_SLIDER_QSS = """
 QWidget {

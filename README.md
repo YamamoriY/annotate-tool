@@ -30,8 +30,8 @@ uv run annotate-tool [path/to/instances.json]
 | 矩形選択 | 左ドラッグ(矩形に触れたインスタンスを選択へ追加) |
 | 選択インスタンスを削除 | Delete(または上部の「削除」ボタン) |
 | インスタンス追加(開始) | A(または上部の「追加」ボタン。未選択のときだけ) |
-| 追加モードで塗る | 左ドラッグ(塗りつぶしペン) |
-| ペンの太さ | 上部の「太さ」スライダー(追加モード中のみ) |
+| 追加モードで塗る / 消す | 左ドラッグ(左上で選んだブラシ / 消しゴム) |
+| ツール切替・太さ | 左上のツールパネル(追加モード中のみ) |
 | 追加を確定 | Enter(または塗り始めると出る「確定」ボタン) |
 | 追加を取消 | Esc(または追加中に出る「キャンセル」ボタン) |
 
@@ -41,6 +41,7 @@ uv run annotate-tool [path/to/instances.json]
 src/annotate_tool/
 ├── app.py            # エントリポイント(引数解析・起動)
 ├── coco_data.py      # GUI 非依存の COCO データモデル / IO
+├── tools.py          # 描画ツールの識別子(Tool.BRUSH / Tool.ERASER)
 ├── state.py          # ViewerState: アプリ状態の一元管理(single source of truth)
 ├── style.py          # 色・スタイル・レイアウト定数
 └── widgets/
@@ -50,8 +51,9 @@ src/annotate_tool/
     ├── side_panel.py      # 操作パネル・ドック(右)
     ├── control_group.py   # 見出し付きボタングループ(移動 / 表示)
     ├── action_bar.py      # 浮動アクションバー(選択解除 / 削除)
-    ├── add_bar.py         # 浮動バー(追加 / 太さ / キャンセル / 確定)。塗りつぶしで新規追加
-    └── brush_slider.py    # ペン太さスライダー(追加モード中に add_bar 内へ表示)
+    ├── add_bar.py         # 浮動バー(追加 / キャンセル / 確定)。塗りつぶしで新規追加
+    ├── tool_panel.py      # 左上の浮動パネル(ブラシ / 消しゴムのトグルと太さ)
+    └── brush_slider.py    # 太さスライダー(tool_panel の各行に並ぶ)
 ```
 
 設計方針:

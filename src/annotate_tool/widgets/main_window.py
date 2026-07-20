@@ -115,6 +115,12 @@ class ViewerWindow(QMainWindow):
         )
         self.side_panel.add_widget(nav)
 
+        guide = ControlGroup("操作方法")
+        guide.add_text("左ドラッグ： 範囲選択")
+        guide.add_text("中ドラッグ： 画像の移動")
+        guide.add_text("ホイール： ズーム")
+        self.side_panel.add_widget(guide)
+
         display = ControlGroup("表示")
         display.add_button("フィット (F)", self.view.fit)
         self._overlay_btn = display.add_button(
@@ -125,16 +131,11 @@ class ViewerWindow(QMainWindow):
         self._fill_btn.setChecked(self.state.fill_visible)
         self.side_panel.add_widget(display)
 
-        guide = ControlGroup("操作方法")
-        guide.add_text("左ドラッグ： 範囲選択")
-        guide.add_text("中ドラッグ： 画像の移動")
-        guide.add_text("ホイール： ズーム")
-        self.side_panel.add_widget(guide)
-
     def _connect_signals(self) -> None:
         # ユーザー操作 -> 状態
         self.view.instanceClicked.connect(self._on_instance_clicked)
         self.view.rectSelected.connect(self._on_rect_selected)
+        self.view.backgroundClicked.connect(self.state.deselect)
         self.view.paintStarted.connect(self._on_paint_started)
         self.view.paintCleared.connect(self._on_paint_cleared)
         self.panel.selectionChanged.connect(self._on_panel_selection)

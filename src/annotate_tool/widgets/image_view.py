@@ -57,6 +57,8 @@ class ImageView(QGraphicsView):
     instanceClicked = Signal(int, bool)
     # 矩形選択: 触れたインスタンス番号のリスト(常に選択へ追加)
     rectSelected = Signal(object)
+    # 何もない場所の単一クリック(Esc と同じく選択解除の合図)
+    backgroundClicked = Signal()
     # 追加モードで塗り始めた(最初の一筆)
     paintStarted = Signal()
     # 消しゴムで塗りが全部消えた(確定できるものが無くなった)
@@ -745,6 +747,9 @@ class ImageView(QGraphicsView):
                 idx = self._instance_at(press_pos)
                 if idx is not None:
                     self.instanceClicked.emit(idx, additive)
+                elif not additive:
+                    # 何もない場所 = 選択解除。Shift 併用時は積み上げ中なので残す。
+                    self.backgroundClicked.emit()
                 return
             # ドラッグ扱い: 矩形に触れたインスタンスを選択へ追加(常に加算)
             rect = QRectF(

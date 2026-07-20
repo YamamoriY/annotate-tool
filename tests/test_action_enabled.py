@@ -107,6 +107,23 @@ def test_escape_is_always_available(window):
     assert enabled(window, shortcuts.ESCAPE)
 
 
+def test_confirm_needs_something_to_confirm(window):
+    """確定するものが無いうちは確定できないこと。
+
+    「確定」ボタンが出る条件と揃えてある。何も塗っていない状態で A を押しても
+    黙ってモードを抜けたりしない(抜けたいときは Esc)。
+    """
+    window.state.enter_add_mode()
+    assert not enabled(window, shortcuts.CONFIRM)
+
+    window.view._add_path_point(QPoint(1, 1))
+    assert enabled(window, shortcuts.CONFIRM)  # 頂点を打てば確定できる
+
+    window.view.cancel_path()
+    assert not enabled(window, shortcuts.CONFIRM)
+    assert window.state.add_mode, "確定できないだけで、モードは維持される"
+
+
 def test_undo_point_follows_the_drawn_path(window):
     """頂点の増減はマウス操作で起きるので、pathChanged 経由で追従する。"""
     window.state.enter_add_mode()

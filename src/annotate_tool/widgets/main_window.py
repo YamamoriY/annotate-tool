@@ -133,7 +133,11 @@ class ViewerWindow(QMainWindow):
             shortcuts.EDIT.id: lambda: (
                 not self.state.add_mode and len(self.state.selected_indices) == 1
             ),
-            shortcuts.CONFIRM.id: lambda: self.state.add_mode,
+            # 確定するものが無いうちは効かせない(「確定」ボタンが出る条件と同じ)。
+            # 何も塗らずに押して黙ってモードが終わると、何が起きたのか分からない。
+            # 抜けたいときは Esc。
+            shortcuts.CONFIRM.id: lambda: self.state.add_mode
+            and (self._painting_started or self.view.has_path()),
             shortcuts.UNDO_POINT.id: lambda: (
                 self.state.add_mode and self.view.has_path()
             ),

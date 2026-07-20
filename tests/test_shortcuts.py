@@ -20,7 +20,8 @@ def test_ids_are_unique():
 def test_no_key_is_bound_twice():
     """同じキーが2つの操作に割り当たっていないこと。
 
-    重複すると Qt はどちらも呼ばず黙って無視するため、気づきにくい。
+    Qt は同じキーに有効な QAction が2つあると曖昧と見なし、どちらも発火させない。
+    例外も警告も出ずキーが黙って死ぬため、ここで止める。
     """
     seen: dict[str, str] = {}
     for s in shortcuts.ALL:
@@ -47,7 +48,14 @@ def test_hint_uses_the_first_key():
 
 def test_hint_rewrites_only_known_keys():
     assert shortcuts.ESCAPE.hint == "Esc"  # 変換表に無いものはそのまま
-    assert shortcuts.CONFIRM.hint == "Enter"  # Return は Enter と出す
+    assert shortcuts.Shortcut("t", "x", ("Return",)).hint == "Enter"
+
+
+def test_add_and_confirm_keys():
+    """追加は A、確定は S(Enter も従来どおり効く)。"""
+    assert shortcuts.ADD.hint == "A"
+    assert shortcuts.CONFIRM.hint == "S"
+    assert "Return" in shortcuts.CONFIRM.keys
 
 
 def test_text_places_prefix_and_suffix():

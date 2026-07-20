@@ -59,8 +59,8 @@ OVERLAY = Shortcut("overlay", "オーバーレイ", ("V",))
 FILL = Shortcut("fill", "塗り", ("B",))
 # 通常時は選択解除、追加モード中はモードの取り消し(段階的に効く)。
 ESCAPE = Shortcut("escape", "選択解除", ("Esc",))
-# 作図中はパスを閉じる動作が優先される。
-CONFIRM = Shortcut("confirm", "確定", ("Return", "Enter"))
+# 作図中はパスを閉じる動作が優先される。Enter も従来どおり効く。
+CONFIRM = Shortcut("confirm", "確定", ("S", "Return", "Enter"))
 UNDO_POINT = Shortcut("undo_point", "頂点を取消", ("Ctrl+Z", "Backspace"))
 DELETE = Shortcut("delete", "削除", ("Delete",))
 

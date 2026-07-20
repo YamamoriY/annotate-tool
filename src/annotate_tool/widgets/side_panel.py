@@ -33,3 +33,7 @@ class SidePanel(QDockWidget):
     def add_widget(self, widget: QWidget) -> None:
         """パネルの内容を上から順に追加する(末尾の伸縮スペースの手前へ挿入)。"""
         self._layout.insertWidget(self._layout.count() - 1, widget)
+
+    def add_widget_bottom(self, widget: QWidget) -> None:
+        """伸縮スペースの後ろへ追加する(パネル下端に貼り付ける)。"""
+        self._layout.addWidget(widget)

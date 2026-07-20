@@ -131,6 +131,10 @@ class ViewerWindow(QMainWindow):
         self._fill_btn.setChecked(self.state.fill_visible)
         self.side_panel.add_widget(display)
 
+        settings = ControlGroup("設定")
+        self._confirm_delete_box = settings.add_checkbox("削除時に確認する", checked=True)
+        self.side_panel.add_widget_bottom(settings)
+
     def _connect_signals(self) -> None:
         # ユーザー操作 -> 状態
         self.view.instanceClicked.connect(self._on_instance_clicked)
@@ -352,6 +356,9 @@ class ViewerWindow(QMainWindow):
     def _delete_selected(self) -> None:
         count = len(self.state.selected_indices)
         if count == 0:
+            return
+        if not self._confirm_delete_box.isChecked():
+            self.state.delete_selected()
             return
         # JSON へ上書き保存する破壊的操作なので確認する
         reply = QMessageBox.question(

@@ -106,6 +106,20 @@ QLabel {
 }
 """
 
+# 設定のオン/オフ(補助テキストと同じ淡さで、チェック時だけ白く立てる)。
+CONTROL_CHECK_QSS = """
+QCheckBox {
+    color: rgba(255, 255, 255, 150);
+    font-size: 12px;
+    padding: 0 4px;
+    background: transparent;
+    border: none;
+}
+QCheckBox:hover { color: rgba(255, 255, 255, 220); }
+"""
+# ::indicator は素のままにする。background-color を当てるとネイティブ描画が
+# 止まり、チェック時の ✓ が消えて「色が変わるだけの四角」になるため。
+
 # カテゴリでまとめる浮動バーの外枠(枠線 + 半透明背景)。
 CONTROL_GROUP_QSS = """
 #controlGroup {

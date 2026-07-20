@@ -11,6 +11,7 @@ from collections.abc import Iterable
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -65,6 +66,17 @@ class ControlGroup(QWidget):
         label.setWordWrap(True)
         self._outer.addWidget(label)
         return label
+
+    def add_checkbox(self, text: str, *, checked: bool = False) -> QCheckBox:
+        """オン/オフの設定行を追加する(状態は返り値の isChecked() で読む)。"""
+        box = QCheckBox(text, self)
+        box.setCursor(Qt.PointingHandCursor)
+        # ボタン同様、フォーカスを奪うと一覧側で自動選択が起きるため受け取らない。
+        box.setFocusPolicy(Qt.NoFocus)
+        box.setStyleSheet(style.CONTROL_CHECK_QSS)
+        box.setChecked(checked)
+        self._outer.addWidget(box)
+        return box
 
     def _make_button(self, text: str, slot, checkable: bool) -> QPushButton:
         btn = QPushButton(text, self)

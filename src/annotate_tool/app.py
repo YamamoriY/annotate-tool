@@ -14,10 +14,13 @@ import argparse
 import sys
 from pathlib import Path
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
-from annotate_tool import settings
+from annotate_tool import resources, settings
 from annotate_tool.widgets import ViewerWindow
+
+APP_ID = "dev.tkino117.annotate-tool"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -50,13 +53,35 @@ def startup_path(json_path: Path | None) -> Path | None:
     return None
 
 
+def _set_windows_app_id() -> None:
+    """タスクバーで独立したアプリとして扱わせる。
+
+    これを設定しないと Windows は起動元（python.exe など）のアイコンで
+    グループ化してしまい、setWindowIcon がタスクバーに反映されない。
+    """
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+    except (AttributeError, OSError):
+        pass  # アイコンが既定のままになるだけなので起動は続行する
+
+
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     if args.json_path is not None and not args.json_path.exists():
         print(f"COCO JSON が見つかりません: {args.json_path}")
         sys.exit(1)
 
+    _set_windows_app_id()
+
     app = QApplication(sys.argv)
+    icon_path = resources.app_icon_path()
+    if icon_path is not None:
+        app.setWindowIcon(QIcon(str(icon_path)))
+
     window = ViewerWindow()
     path = startup_path(args.json_path)
     if path is not None:

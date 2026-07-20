@@ -83,6 +83,8 @@ class ImageView(QGraphicsView):
         self._paint_item: _MaskItem | None = None  # マスクを表示するアイテム
         self._add_dim_item: QGraphicsRectItem | None = None
         self._last_paint_pt: QPointF | None = None
+        self._brush_radius = style.BRUSH_RADIUS  # スライダーで変わる(モード跨ぎで保持)
+        self._min_paint_radius = style.BRUSH_RADIUS_MAX  # この回で使った最も細い筆
 
     # --- シーン構築 ---------------------------------------------------------
     def set_image(self, pixmap: QPixmap) -> None:
@@ -246,11 +248,20 @@ class ImageView(QGraphicsView):
             self.setDragMode(QGraphicsView.RubberBandDrag)
             self.unsetCursor()
 
+    def set_brush_radius(self, radius: float) -> None:
+        """塗りブラシの半径(画像座標 px)を変える。カーソルの円も追従させる。"""
+        radius = max(style.BRUSH_RADIUS_MIN, min(radius, style.BRUSH_RADIUS_MAX))
+        if radius == self._brush_radius:
+            return
+        self._brush_radius = radius
+        if self._add_mode:
+            self._update_brush_cursor()
+
     def _update_brush_cursor(self) -> None:
         """ブラシ半径(画像座標)を現在のズーム倍率で画面サイズに直し、
-        その太さの円の輪郭をカーソルにする。ズームすると呼び直す。"""
+        その太さの円の輪郭をカーソルにする。ズームや太さ変更で呼び直す。"""
         scale = self.transform().m11()  # ビューは等方スケールのみ
-        diameter = max(6.0, min(2.0 * style.BRUSH_RADIUS * scale, 512.0))
+        diameter = max(6.0, min(2.0 * self._brush_radius * scale, 512.0))
         margin = 2
         size = int(math.ceil(diameter)) + margin * 2
         pm = QPixmap(size, size)
@@ -278,6 +289,7 @@ class ImageView(QGraphicsView):
                 setattr(self, attr, None)
         self._mask_image = None
         self._last_paint_pt = None
+        self._min_paint_radius = style.BRUSH_RADIUS_MAX
 
     def _paint_to(self, scene_pt: QPointF) -> None:
         """ブラシ半径の円をマスクへ焼き込む。前回点から掃引して隙間を埋める。
@@ -288,7 +300,10 @@ class ImageView(QGraphicsView):
         """
         if self._mask_image is None:
             return
-        r = style.BRUSH_RADIUS
+        r = self._brush_radius
+        # スリバー判定の基準は「この回で使った最も細い筆」。太い筆に持ち替えた後でも
+        # 細筆で打った点が捨てられないようにする。
+        self._min_paint_radius = min(self._min_paint_radius, r)
         last = self._last_paint_pt
 
         painter = QPainter(self._mask_image)
@@ -343,7 +358,7 @@ class ImageView(QGraphicsView):
         return mask_to_polygons(
             alpha,
             epsilon=style.PAINT_SIMPLIFY_EPSILON,
-            min_area=style.PAINT_MIN_AREA,
+            min_area=style.paint_min_area(self._min_paint_radius),
         )
 
     # --- パン(中ボタンドラッグ)----------------------------------------------

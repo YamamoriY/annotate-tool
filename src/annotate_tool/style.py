@@ -23,11 +23,13 @@ Z_SELECTED = 1.0
 
 # --- 追加(塗りつぶし)モード -----------------------------------------------
 ADD_DIM_ALPHA = 130  # 追加モード中に全体へかける暗幕の濃さ
-BRUSH_RADIUS = 12.0  # 塗りブラシの半径(画像=シーン座標のピクセル)
+# 塗りブラシの半径(画像=シーン座標のピクセル)。スライダーで MIN..MAX を動かす。
+BRUSH_RADIUS = 12.0
+BRUSH_RADIUS_MIN = 2.0
+BRUSH_RADIUS_MAX = 60.0
 PAINT_COLOR = QColor(90, 220, 150, 150)  # 塗った領域の表示色(半透明)
 # 確定時にマスクを polygon 化するときのパラメータ(mask_polygon へ渡す)。
 PAINT_SIMPLIFY_EPSILON = 1.5  # approxPolyDP の許容誤差[px]。大きいほど点が減る。
-PAINT_MIN_AREA = (BRUSH_RADIUS * 0.5) ** 2  # これ未満の塗り領域はスリバーとして捨てる
 Z_ADD_DIM = 3.0  # 追加モードの暗幕(オーバーレイより上)
 Z_PAINT = 3.5  # 塗った領域(暗幕より上)
 
@@ -145,6 +147,36 @@ QPushButton:hover { background-color: rgba(70, 70, 70, 220); }
 QPushButton:pressed { background-color: rgba(20, 20, 20, 230); }
 """
 
+# ブラシ太さスライダー(追加モード中に浮動バーへ並べる)。
+BRUSH_SLIDER_WIDTH = 110
+BRUSH_SLIDER_QSS = """
+QWidget {
+    background-color: rgba(40, 40, 40, 200);
+    border: 1px solid rgba(255, 255, 255, 90);
+    border-radius: 14px;
+}
+QLabel { background: transparent; border: none; color: white; font-size: 13px; }
+QSlider { background: transparent; border: none; }
+QSlider::groove:horizontal {
+    height: 4px;
+    background: rgba(255, 255, 255, 70);
+    border: none;
+    border-radius: 2px;
+}
+QSlider::handle:horizontal {
+    width: 12px;
+    margin: -5px 0;
+    background: rgba(240, 240, 240, 235);
+    border: none;
+    border-radius: 6px;
+}
+QSlider::handle:horizontal:hover { background: white; }
+QSlider::sub-page:horizontal {
+    background: rgba(200, 200, 200, 160);
+    border-radius: 2px;
+}
+"""
+
 # 「キャンセル」ボタン(追加モード中は常に上部へ表示)。
 CANCEL_BUTTON_QSS = DESELECT_BUTTON_QSS
 
@@ -161,6 +193,11 @@ QPushButton {
 QPushButton:hover { background-color: rgba(55, 165, 105, 235); }
 QPushButton:pressed { background-color: rgba(35, 110, 70, 240); }
 """
+
+
+def paint_min_area(radius: float) -> float:
+    """これ未満の塗り領域はスリバーとして捨てる面積。ブラシ半径に比例させる。"""
+    return (radius * 0.5) ** 2
 
 
 def instance_color(index: int) -> QColor:

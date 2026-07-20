@@ -136,6 +136,7 @@ class ViewerWindow(QMainWindow):
         self.action_bar.deleteClicked.connect(self._delete_selected)
         self.add_bar.addClicked.connect(self.state.enter_add_mode)
         self.add_bar.cancelClicked.connect(self.state.cancel_add_mode)
+        self.add_bar.brushRadiusChanged.connect(self.view.set_brush_radius)
         self.add_bar.confirmClicked.connect(self._confirm_add)
 
         # 状態 -> 表示

@@ -67,8 +67,10 @@ class _OverlayPolygonItem(QGraphicsPolygonItem):
         rect = super().boundingRect()
         if self._halo_pen is None:
             return rect
-        # 縁は本線より外へ張り出すぶん、既定の矩形では描画が欠ける
-        margin = style.HALO_EXTRA_WIDTH
+        # 縁は本線より外へ張り出すぶん、既定の矩形では描画が欠ける。ペンは
+        # コスメティック(画面ピクセル幅)で、ズームアウト時はシーン座標での
+        # 張り出しが 1/scale 倍になるため、余白は固定値で大きめに取る。
+        margin = style.HALO_BOUNDS_MARGIN
         return rect.adjusted(-margin, -margin, margin, margin)
 
     def paint(self, painter: QPainter, option, widget=None) -> None:  # noqa: ANN001
@@ -87,6 +89,43 @@ class _OverlayPolygonItem(QGraphicsPolygonItem):
             painter.drawPolygon(poly)
         painter.setPen(self.pen())
         painter.drawPolygon(poly)
+
+
+class _OverlayLayerItem(QGraphicsItem):
+    """全インスタンスを事前レンダリングした1枚のラスタを表示するアイテム。
+
+    数百のポリゴンアイテムを毎フレーム描くとパンのたびにフルフレームの
+    ベクタ描画が走って重い(実測: 454個で ~46ms/フレーム)。代わりに
+    非選択インスタンスをここへ焼き込み、パン中は画像1枚の転送(~1ms)で済ませる。
+    QGIS など地図キャンバスのレイヤキャッシュと同じ方式。
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._pixmap = QPixmap()
+        self._target = QRectF()  # レイヤが覆うシーン上の範囲
+        self._source = QRectF()  # ピクスマップ中の有効範囲(端数の余白を除く)
+
+    def set_layer(self, pixmap: QPixmap, target: QRectF, source: QRectF) -> None:
+        self.prepareGeometryChange()
+        self._pixmap = pixmap
+        self._target = QRectF(target)
+        self._source = QRectF(source)
+        self.update()
+
+    def clear_layer(self) -> None:
+        self.set_layer(QPixmap(), QRectF(), QRectF())
+
+    def boundingRect(self) -> QRectF:
+        return self._target
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:  # noqa: ANN001
+        if self._pixmap.isNull():
+            return
+        # ズーム直後の焼き直し待ちの間は倍率が合わないまま伸縮されるので、
+        # 補間を効かせて破綻を抑える(焼き直し後は等倍転送になる)。
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        painter.drawPixmap(self._target, self._pixmap, self._source)
 
 
 class ImageView(QGraphicsView):
@@ -129,6 +168,18 @@ class ImageView(QGraphicsView):
         self._items_by_index: list[list[_OverlayPolygonItem]] = []
         self._show_fill = True
         self._selected: set[int] = set()
+
+        # オーバーレイのレイヤキャッシュ。非選択インスタンスはポリゴンアイテムを
+        # 直接描かず(ItemHasNoContents)、ここへ焼いた1枚のラスタで表示する。
+        # ポリゴンアイテム自体は当たり判定(クリック・矩形選択)と選択時の強調
+        # 描画のために残す。
+        self._layer_item: _OverlayLayerItem | None = None
+        self._layer_scale = 0.0  # レイヤを焼いたときのビュー倍率
+        self._layer_rect = QRectF()  # レイヤが覆うシーン範囲
+        self._layer_timer = QTimer(self)
+        self._layer_timer.setSingleShot(True)
+        self._layer_timer.setInterval(style.LAYER_RENDER_DELAY_MS)
+        self._layer_timer.timeout.connect(self._render_overlay_layer)
 
         # 点滅表示。実際に点滅するかは「ユーザーが有効にしたか」と「塗り編集中で
         # ないか」の両方で決まるので、二つを別々に持ち _update_blink に集約する。
@@ -176,11 +227,20 @@ class ImageView(QGraphicsView):
 
     # --- シーン構築 ---------------------------------------------------------
     def set_image(self, pixmap: QPixmap) -> None:
-        self._scene.clear()
+        self._scene.clear()  # 旧レイヤアイテムもここで破棄される
         self._items_by_index = []
         self._selected = set()
+        self._layer_item = None
+        self._layer_timer.stop()
         self._pixmap_item = self._scene.addPixmap(pixmap)
         self._scene.setSceneRect(self._pixmap_item.boundingRect())
+
+        # オーバーレイのレイヤ(Z は画像と同じ 0。後から追加したぶん画像の上、
+        # 暗幕 Z_DIM より下に入る)
+        self._layer_item = _OverlayLayerItem()
+        self._scene.addItem(self._layer_item)
+        self._layer_scale = 0.0
+        self._layer_rect = QRectF()
 
         # 選択時に非選択部を暗くするための暗幕(普段は非表示)
         self._dim_item = self._scene.addRect(self._scene.sceneRect())
@@ -203,6 +263,8 @@ class ImageView(QGraphicsView):
         self._selected = set()
         self._pixmap_item = None
         self._dim_item = None
+        self._layer_item = None
+        self._layer_timer.stop()
         self._scene.setSceneRect(0, 0, 0, 0)
 
     def set_overlays(
@@ -232,6 +294,9 @@ class ImageView(QGraphicsView):
                 item.setPen(self._make_pen(color, selected=False))
                 item.set_halo_pen(self._make_halo_pen(selected=False))
                 item.setBrush(self._make_brush(color, selected=False))
+                # 非選択の間は自前で描かない(表示はレイヤキャッシュが担う)。
+                # アイテム自体は当たり判定のために残す。
+                item.setFlag(QGraphicsItem.ItemHasNoContents, True)
                 self._scene.addItem(item)
                 items.append(item)
             self._items_by_index.append(items)
@@ -240,6 +305,7 @@ class ImageView(QGraphicsView):
         # これを忘れると、消えている位相での画像送りや追加確定のあと、次の点滅まで
         # オーバーレイが出たままになる。
         self._apply_blink()
+        self._render_overlay_layer()
 
     def _pen_width(self, selected: bool) -> float:
         """本線の幅。塗りを消しているときは境界判定用に太くする。"""
@@ -328,12 +394,18 @@ class ImageView(QGraphicsView):
             item.set_halo_pen(self._make_halo_pen(selected))
             item.setBrush(self._make_brush(color, selected))
             item.setZValue(style.Z_SELECTED if raise_z else 0.0)
+            # 選択中だけ自前で描く(暗幕の上に強調表示を出すため)。非選択に
+            # 戻ったら描画をやめ、表示をレイヤキャッシュへ返す。レイヤには
+            # 非選択スタイルが焼かれたままなので、焼き直しは要らない。
+            item.setFlag(QGraphicsItem.ItemHasNoContents, not selected)
 
     # --- 表示切り替え --------------------------------------------------------
     def set_overlay_visible(self, visible: bool) -> None:
         for items in self._items_by_index:
             for item in items:
                 item.setVisible(visible)
+        if self._layer_item is not None:
+            self._layer_item.setVisible(visible)
 
     def set_fill_visible(self, visible: bool) -> None:
         """塗りの有無を切り替える。選択状態は維持したまま再スタイルする。
@@ -348,6 +420,7 @@ class ImageView(QGraphicsView):
                 item.setPen(self._make_pen(color, selected))
                 item.set_halo_pen(self._make_halo_pen(selected))
                 item.setBrush(self._make_brush(color, selected))
+        self._render_overlay_layer()  # 非選択スタイルが変わったので焼き直す
 
     # --- 点滅表示 ------------------------------------------------------------
     def set_blink_enabled(self, enabled: bool) -> None:
@@ -389,6 +462,8 @@ class ImageView(QGraphicsView):
         for items in self._items_by_index:
             for item in items:
                 item.setOpacity(opacity)
+        if self._layer_item is not None:
+            self._layer_item.setOpacity(opacity)
 
     # --- ズーム / フィット / クリック ---------------------------------------
     def fit(self) -> None:
@@ -396,12 +471,125 @@ class ImageView(QGraphicsView):
             self.fitInView(self._pixmap_item, Qt.KeepAspectRatio)
         if self._add_mode:
             self._apply_cursor()  # 倍率が変わったのでブラシ円を作り直す
+        self._maybe_rerender_layer()
 
     def wheelEvent(self, event) -> None:
         factor = style.ZOOM_STEP if event.angleDelta().y() > 0 else 1 / style.ZOOM_STEP
         self.scale(factor, factor)
         if self._add_mode:
             self._apply_cursor()  # 倍率が変わったのでブラシ円を作り直す
+        self._maybe_rerender_layer()
+
+    def scrollContentsBy(self, dx: int, dy: int) -> None:
+        super().scrollContentsBy(dx, dy)
+        # パン(中ボタン・スクロールバー・centerOn いずれも)でレイヤの
+        # マージンを使い切ったら焼き直しを予約する。__init__ 中にも呼ばれうる
+        # ので属性の有無を確かめる。
+        if getattr(self, "_layer_item", None) is not None:
+            self._maybe_rerender_layer()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if getattr(self, "_layer_item", None) is not None:
+            self._maybe_rerender_layer()
+
+    # --- オーバーレイのレイヤキャッシュ --------------------------------------
+    def _visible_scene_rect(self) -> QRectF:
+        """ビューポートが映しているシーン範囲(シーン矩形へ切り詰め)。"""
+        visible = self.mapToScene(self.viewport().rect()).boundingRect()
+        return visible.intersected(self._scene.sceneRect())
+
+    def _maybe_rerender_layer(self) -> None:
+        """レイヤが今の表示に合わなくなっていたら焼き直しを予約する。
+
+        ホイールズームや慣性的な連続パンで毎回焼くと本末転倒なので、
+        操作が途切れてから1回だけ焼く(その間は古いレイヤが伸縮表示される)。
+        """
+        if self._layer_item is None or not self._items_by_index:
+            return
+        scale = self.transform().m11()
+        stale_zoom = abs(scale - self._layer_scale) > self._layer_scale * 1e-3
+        stale_pan = not self._layer_rect.contains(self._visible_scene_rect())
+        if stale_zoom or stale_pan:
+            self._layer_timer.start()
+
+    def _render_overlay_layer(self) -> None:
+        """非選択インスタンスを「ビューポート+マージン」の範囲へ焼き込む。
+
+        現在のズーム倍率のピクセル密度で焼くので、コスメティックペン
+        (画面上で一定の線幅)の見た目がそのまま保たれる。マージン内の
+        パンでは再レンダリング不要になる。
+        """
+        self._layer_timer.stop()
+        if self._layer_item is None or self._pixmap_item is None:
+            return
+        if not self._items_by_index:
+            self._layer_item.clear_layer()
+            return
+
+        visible = self._visible_scene_rect()
+        if visible.isEmpty():
+            return
+        mx = visible.width() * style.LAYER_MARGIN_FRAC
+        my = visible.height() * style.LAYER_MARGIN_FRAC
+        rect = visible.adjusted(-mx, -my, mx, my).intersected(
+            self._scene.sceneRect()
+        )
+        if rect.isEmpty():
+            return
+
+        # 焼き込み解像度は「ビュー倍率 × デバイス倍率」。高DPI環境でも線が
+        # 甘くならない。画素数が上限を超えるときだけ解像度を落とす。
+        scale = self.transform().m11()
+        dpr = self.viewport().devicePixelRatioF()
+        eff = scale * dpr
+        w = rect.width() * eff
+        h = rect.height() * eff
+        if w * h > style.LAYER_MAX_PIXELS:
+            eff *= (style.LAYER_MAX_PIXELS / (w * h)) ** 0.5
+            w = rect.width() * eff
+            h = rect.height() * eff
+
+        image = QImage(
+            max(1, math.ceil(w)), max(1, math.ceil(h)),
+            QImage.Format_ARGB32_Premultiplied,
+        )
+        image.fill(Qt.transparent)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.scale(eff, eff)
+        painter.translate(-rect.x(), -rect.y())
+
+        # コスメティックペンの張り出しを見込んで、範囲判定は少し外側まで拾う
+        cull = rect.adjusted(-style.HALO_BOUNDS_MARGIN, -style.HALO_BOUNDS_MARGIN,
+                             style.HALO_BOUNDS_MARGIN, style.HALO_BOUNDS_MARGIN)
+        for idx, items in enumerate(self._items_by_index):
+            color = style.instance_color(idx)
+            pen = self._make_pen(color, selected=False)
+            halo = self._make_halo_pen(selected=False)
+            brush = self._make_brush(color, selected=False)
+            for item in items:
+                if item in self._hidden_items:
+                    continue  # 修正中のインスタンスはレイヤにも出さない
+                poly = item.polygon()
+                if not poly.boundingRect().intersects(cull):
+                    continue
+                if brush.color().alpha() > 0:
+                    painter.setPen(Qt.NoPen)
+                    painter.setBrush(brush)
+                    painter.drawPolygon(poly)
+                painter.setBrush(Qt.NoBrush)
+                painter.setPen(halo)
+                painter.drawPolygon(poly)
+                painter.setPen(pen)
+                painter.drawPolygon(poly)
+        painter.end()
+
+        self._layer_item.set_layer(
+            QPixmap.fromImage(image), rect, QRectF(0, 0, w, h)
+        )
+        self._layer_scale = scale
+        self._layer_rect = QRectF(rect)
 
     # --- 追加(塗りつぶし)モード --------------------------------------------
     def set_add_mode(
@@ -477,11 +665,15 @@ class ImageView(QGraphicsView):
         for item in self._items_by_index[index]:
             self._hidden_items.append(item)
             item.setVisible(False)
+        self._render_overlay_layer()  # レイヤからも消す
 
     def _restore_hidden(self) -> None:
+        if not self._hidden_items:
+            return
         for item in self._hidden_items:
             item.setVisible(True)
         self._hidden_items = []
+        self._render_overlay_layer()  # レイヤへ戻す
 
     def set_tool(self, tool: Tool) -> None:
         """描画ツール(ブラシ / 消しゴム / パス)を切り替える。

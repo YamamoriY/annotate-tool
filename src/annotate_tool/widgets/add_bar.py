@@ -15,7 +15,7 @@ from __future__ import annotations
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import QAbstractScrollArea, QHBoxLayout, QPushButton, QWidget
 
-from annotate_tool import style
+from annotate_tool import shortcuts, style
 
 
 class AddBar(QWidget):
@@ -34,13 +34,16 @@ class AddBar(QWidget):
         layout.setSpacing(style.FLOATING_BUTTON_SPACING)
 
         self._add_btn = self._make_button(
-            "＋ 追加 (A)", style.ADD_BUTTON_QSS, self.addClicked
+            shortcuts.ADD.text("＋"), style.ADD_BUTTON_QSS, self.addClicked
         )
+        # Esc は通常時の「選択解除」と同じキー。追加モード中は言葉だけ変える。
         self._cancel_btn = self._make_button(
-            "✕ キャンセル (Esc)", style.CANCEL_BUTTON_QSS, self.cancelClicked
+            shortcuts.ESCAPE.text("✕", label="キャンセル"),
+            style.CANCEL_BUTTON_QSS,
+            self.cancelClicked,
         )
         self._confirm_btn = self._make_button(
-            "✓ 確定 (Enter)", style.CONFIRM_BUTTON_QSS, self.confirmClicked
+            shortcuts.CONFIRM.text("✓"), style.CONFIRM_BUTTON_QSS, self.confirmClicked
         )
         # 表示順: 追加 / キャンセル / 確定(同時に出るのは後ろ2つだけ)
         self._widgets = (self._add_btn, self._cancel_btn, self._confirm_btn)

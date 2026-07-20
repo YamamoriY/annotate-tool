@@ -11,7 +11,7 @@ from __future__ import annotations
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import QAbstractScrollArea, QHBoxLayout, QPushButton, QWidget
 
-from annotate_tool import style
+from annotate_tool import shortcuts, style
 
 
 class FloatingActionBar(QWidget):
@@ -30,13 +30,13 @@ class FloatingActionBar(QWidget):
         layout.setSpacing(style.FLOATING_BUTTON_SPACING)
 
         self._deselect_btn = self._make_button(
-            "✕ 選択解除 (Esc)", style.DESELECT_BUTTON_QSS, self.deselectClicked
+            shortcuts.ESCAPE.text("✕"), style.DESELECT_BUTTON_QSS, self.deselectClicked
         )
         self._edit_btn = self._make_button(
-            "✎ 修正 (E)", style.ADD_BUTTON_QSS, self.editClicked
+            shortcuts.EDIT.text("✎"), style.ADD_BUTTON_QSS, self.editClicked
         )
         self._delete_btn = self._make_button(
-            "🗑 削除 (Delete)", style.DELETE_BUTTON_QSS, self.deleteClicked
+            shortcuts.DELETE.text("🗑"), style.DELETE_BUTTON_QSS, self.deleteClicked
         )
         layout.addWidget(self._deselect_btn)
         layout.addWidget(self._edit_btn)

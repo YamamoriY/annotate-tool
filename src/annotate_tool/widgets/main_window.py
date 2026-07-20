@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer
 
-from annotate_tool import settings, style
+from annotate_tool import settings, shortcuts, style
 from annotate_tool.coco_data import CocoDataset
 from annotate_tool.state import ViewerState
 from annotate_tool.tools import Tool
@@ -90,31 +90,39 @@ class ViewerWindow(QMainWindow):
 
     # --- 組み立て -----------------------------------------------------------
     def _build_actions(self) -> None:
-        def make(text: str, keys: list[str], slot) -> QAction:
-            action = QAction(text, self)
-            action.setShortcuts([QKeySequence(k) for k in keys])
+        """定義表(shortcuts)の各項目へ、このウィンドウの処理を結びつける。
+
+        キーと動作名は表側が持つ。ここが決めるのは「どれが何を呼ぶか」だけ。
+        """
+
+        def make(shortcut: shortcuts.Shortcut, slot) -> QAction:
+            action = QAction(shortcut.label, self)
+            action.setShortcuts([QKeySequence(k) for k in shortcut.keys])
             action.triggered.connect(slot)
             self.addAction(action)  # ツールバー未追加でもショートカットを有効にする
             return action
 
         # ショートカットのみ(ボタンはビュー上の浮動バーが担う)。
-        make("前", ["Left"], self.state.prev_image)
-        make("次", ["Right", "D", "Space"], self.state.next_image)
-        make("追加", ["A"], self._on_add_shortcut)
-        make("修正", ["E"], self._edit_selected)
-        make("フィット", ["F"], self.view.fit)
-        make("オーバーレイ", ["V"], self.state.toggle_overlay)
-        make("塗り", ["B"], self.state.toggle_fill)
-        make("選択解除 / 追加取消", ["Esc"], self._on_escape)
-        make("確定 / パスを閉じる", ["Return", "Enter"], self._confirm_add)
-        make("頂点を取消", ["Ctrl+Z", "Backspace"], self._undo_path_point)
-        make("削除", ["Delete"], self._delete_selected)
+        make(shortcuts.PREV, self.state.prev_image)
+        make(shortcuts.NEXT, self.state.next_image)
+        make(shortcuts.ADD, self._on_add_shortcut)
+        make(shortcuts.EDIT, self._edit_selected)
+        make(shortcuts.FIT, self.view.fit)
+        make(shortcuts.OVERLAY, self.state.toggle_overlay)
+        make(shortcuts.FILL, self.state.toggle_fill)
+        make(shortcuts.ESCAPE, self._on_escape)
+        make(shortcuts.CONFIRM, self._confirm_add)
+        make(shortcuts.UNDO_POINT, self._undo_path_point)
+        make(shortcuts.DELETE, self._delete_selected)
 
     def _build_side_controls(self) -> None:
         """右パネルに「画像の移動」と「表示」の操作グループを積む。"""
         nav = ControlGroup("画像の移動")
         nav.add_row(
-            [("◀ 前 (←)", self.state.prev_image), ("次 ▶ (→)", self.state.next_image)]
+            [
+                (shortcuts.PREV.text(prefix="◀"), self.state.prev_image),
+                (shortcuts.NEXT.text(suffix="▶"), self.state.next_image),
+            ]
         )
         self.side_panel.add_widget(nav)
 
@@ -125,11 +133,13 @@ class ViewerWindow(QMainWindow):
         self.side_panel.add_widget(guide)
 
         display = ControlGroup("表示")
-        display.add_button("フィット (F)", self.view.fit)
+        display.add_button(shortcuts.FIT.text(), self.view.fit)
         self._overlay_btn = display.add_button(
-            "オーバーレイ (V)", self.state.toggle_overlay, checkable=True
+            shortcuts.OVERLAY.text(), self.state.toggle_overlay, checkable=True
         )
-        self._fill_btn = display.add_button("塗り (B)", self.state.toggle_fill, checkable=True)
+        self._fill_btn = display.add_button(
+            shortcuts.FILL.text(), self.state.toggle_fill, checkable=True
+        )
         self._overlay_btn.setChecked(self.state.overlay_visible)
         self._fill_btn.setChecked(self.state.fill_visible)
         self.side_panel.add_widget(display)

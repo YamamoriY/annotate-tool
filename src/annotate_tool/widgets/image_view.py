@@ -658,8 +658,9 @@ class ImageView(QGraphicsView):
             event.accept()
             return
         if self._add_mode and self._is_path_tool and event.button() == Qt.LeftButton:
-            # 頂点の確定は release 側で行う(押しっぱなしで少しずれても飛ばさない)
-            self._press_pos = event.pos()
+            # 押した瞬間の位置で頂点を確定する。release まで待つとドラッグ判定に
+            # 引っかかり、マウスを動かしながらのクリックで頂点が打てなくなる。
+            self._add_path_point(event.pos())
             event.accept()
             return
         if self._add_mode and event.button() == Qt.LeftButton:
@@ -712,15 +713,7 @@ class ImageView(QGraphicsView):
             return
 
         if self._add_mode and self._is_path_tool and event.button() == Qt.LeftButton:
-            press_pos = self._press_pos
-            self._press_pos = None
-            # ドラッグしてしまったときは頂点を打たない(誤操作の吸収)
-            if (
-                press_pos is not None
-                and (event.pos() - press_pos).manhattanLength()
-                <= style.CLICK_DRAG_THRESHOLD
-            ):
-                self._add_path_point(press_pos)
+            # 頂点は press で確定済み。ここでは選択処理へ落とさないだけ。
             event.accept()
             return
 

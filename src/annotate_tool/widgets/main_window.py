@@ -213,12 +213,21 @@ class ViewerWindow(QMainWindow):
         if active:
             # 修正は既に塗られた状態から始まるので、最初から「確定」を出す
             self._painting_started = edit_index is not None
-            # 入り口は必ずブラシ。前回の消しゴムのまま入ると、空のマスクを
-            # 消そうとして何も起きず戸惑うため。
-            self.tool_panel.set_tool(Tool.BRUSH)
-            self.view.set_tool(Tool.BRUSH)
+            entry = self._entry_tool()
+            self.tool_panel.set_tool(entry)
+            self.view.set_tool(entry)
         self.tool_panel.set_active(active)
         self._update_top_bar()
+
+    def _entry_tool(self) -> Tool:
+        """編集モードに入るときのツール。前回の選択を引き継ぐ。
+
+        引き継ぐのは「描く側」(ブラシ / パス)だけ。消しゴムのまま入ると、まだ何も
+        塗られていないマスクを消そうとして何も起きず戸惑うため、ブラシへ戻す。
+        ツールパネルはモードを抜けても選択状態を保持しているので、そこから読む。
+        """
+        tool = self.tool_panel.tool()
+        return Tool.BRUSH if tool is Tool.ERASER else tool
 
     def _on_add_shortcut(self) -> None:
         # A キーは「追加」ボタンが出ているとき(通常時・未選択)だけ有効にする

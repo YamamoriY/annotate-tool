@@ -86,12 +86,16 @@ class ControlGroup(QWidget):
         maximum: int,
         value: int,
         formatter: Callable[[int], str],
-    ) -> QSlider:
-        """つまみ + 現在値の行を追加する。
+    ) -> tuple[QSlider, QLabel]:
+        """つまみと、その下の読み取り行(左=現在値 / 右=補足)を追加する。
 
-        現在値の表示は formatter(つまみ位置) の文字列で、つまみが動くたびに
-        更新される。返すのは QSlider なので、呼び出し側は valueChanged だけでなく
-        sliderPressed(値が変わらない「触っただけ」)も拾える。
+        現在値は formatter(つまみ位置) の文字列で、つまみが動くたびに更新される。
+        右側は空の補足ラベルとして返すので、呼び出し側が結果(件数など)を入れる。
+        読み取り行は常に置いたままにする(空文字で更新する)。出し入れすると
+        グループの高さが変わってスライダーが上下にずれるため。
+
+        返すのは (QSlider, 補足ラベル)。QSlider をそのまま返すので、呼び出し側は
+        valueChanged だけでなく sliderPressed(値が変わらない「触っただけ」)も拾える。
         """
         slider = QSlider(Qt.Horizontal, self)
         slider.setRange(minimum, maximum)
@@ -99,14 +103,26 @@ class ControlGroup(QWidget):
         # ボタン類と同じく、フォーカスを奪うと一覧へ移って自動選択が起きるため防ぐ。
         slider.setFocusPolicy(Qt.NoFocus)
         slider.setCursor(Qt.PointingHandCursor)
+        slider.setStyleSheet(style.PANEL_SLIDER_QSS)
 
-        label = QLabel(formatter(value), self)
-        label.setStyleSheet(style.CONTROL_HELP_QSS)
-        slider.valueChanged.connect(lambda v: label.setText(formatter(v)))
+        value_label = QLabel(formatter(value), self)
+        value_label.setStyleSheet(style.CONTROL_VALUE_QSS)
+        slider.valueChanged.connect(lambda v: value_label.setText(formatter(v)))
+
+        note_label = QLabel("", self)
+        note_label.setStyleSheet(style.CONTROL_HELP_QSS)
+        note_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        readout = QHBoxLayout()
+        readout.setContentsMargins(0, 0, 0, 0)
+        readout.setSpacing(6)
+        readout.addWidget(value_label)
+        readout.addStretch(1)
+        readout.addWidget(note_label)
 
         self._outer.addWidget(slider)
-        self._outer.addWidget(label)
-        return slider
+        self._outer.addLayout(readout)
+        return slider, note_label
 
     def _make_button(self, text: str, slot, checkable: bool) -> QPushButton:
         btn = QPushButton(text, self)

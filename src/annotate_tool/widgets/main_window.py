@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer
 
-from annotate_tool import style
+from annotate_tool import settings, style
 from annotate_tool.coco_data import CocoDataset
 from annotate_tool.state import ViewerState
 from annotate_tool.tools import Tool
@@ -38,6 +38,7 @@ class ViewerWindow(QMainWindow):
     def __init__(self, dataset: CocoDataset):
         super().__init__()
         self.state = ViewerState(dataset, self)
+        self.settings = settings.load()
         self._did_initial_fit = False
         self._painting_started = False  # 追加モードで塗り始めたか(上部ボタン制御用)
         self._save_dirty = False  # 未保存の変更があるか(遅延保存用)
@@ -133,20 +134,25 @@ class ViewerWindow(QMainWindow):
         self._fill_btn.setChecked(self.state.fill_visible)
         self.side_panel.add_widget(display)
 
-        select = ControlGroup("選択")
-        select.add_text("この面積以下をまとめて選択")
-        self._area_slider = select.add_slider(
+        # 見出しがそのまま操作の説明になっているので、注釈行は置かない。
+        select = ControlGroup("面積で選択")
+        self._area_slider, self._area_count_label = select.add_slider(
             minimum=0,
             maximum=style.AREA_SLIDER_STEPS,
             value=0,
             formatter=lambda pos: style.format_area(style.area_from_slider(pos)),
         )
-        self._area_count_label = select.add_text("")
         self.side_panel.add_widget(select)
 
-        settings = ControlGroup("設定")
-        self._confirm_delete_box = settings.add_checkbox("削除時に確認する", checked=True)
-        self.side_panel.add_widget_bottom(settings)
+        setting_group = ControlGroup("設定")
+        self._confirm_delete_box = setting_group.add_checkbox(
+            "削除時に確認する", checked=settings.confirm_delete(self.settings)
+        )
+        # 切り替えた時点で書き出す(終了時にまとめて書くと、強制終了で失われる)
+        self._confirm_delete_box.toggled.connect(
+            lambda checked: settings.set_confirm_delete(self.settings, checked)
+        )
+        self.side_panel.add_widget_bottom(setting_group)
 
     def _connect_signals(self) -> None:
         # ユーザー操作 -> 状態
@@ -222,7 +228,7 @@ class ViewerWindow(QMainWindow):
         # 「修正」は単一選択のときだけ(どれを塗り直すか決まるのはそのときだけ)
         self.action_bar.set_active(bool(indices), can_edit=len(indices) == 1)
         self._update_top_bar()
-        self._area_count_label.setText(f"選択中: {len(indices)} 件" if indices else "")
+        self._area_count_label.setText(f"{len(indices)}件" if indices else "")
         if not indices and not self._area_syncing:
             # 選択が解除されたらつまみも戻す(残すと、何も選ばれていないのに
             # 面積を指したままになり表示が嘘になる)。

@@ -236,6 +236,41 @@ AREA_SLIDER_STEPS = 1000
 AREA_SLIDER_MIN_LOG2 = 0.0  # 1 px^2
 AREA_SLIDER_MAX_LOG2 = 16.0  # 65536 px^2 (相当辺長 256px)
 
+# パネル内に直接置くスライダー(浮動バーの BRUSH_SLIDER と違い、外枠は付けない)。
+PANEL_SLIDER_QSS = """
+QSlider { background: transparent; border: none; }
+QSlider::groove:horizontal {
+    height: 4px;
+    background: rgba(255, 255, 255, 60);
+    border: none;
+    border-radius: 2px;
+}
+QSlider::handle:horizontal {
+    width: 12px;
+    margin: -5px 0;
+    background: rgba(240, 240, 240, 235);
+    border: none;
+    border-radius: 6px;
+}
+QSlider::handle:horizontal:hover { background: white; }
+QSlider::sub-page:horizontal {
+    background: rgba(200, 200, 200, 160);
+    border-radius: 2px;
+}
+"""
+
+# スライダーの現在値(読み取り行の主役。補助テキストより明るく太く)。
+CONTROL_VALUE_QSS = """
+QLabel {
+    color: rgba(255, 255, 255, 235);
+    font-size: 13px;
+    font-weight: bold;
+    padding: 0 4px;
+    background: transparent;
+    border: none;
+}
+"""
+
 # 「キャンセル」ボタン(追加モード中は常に上部へ表示)。
 CANCEL_BUTTON_QSS = DESELECT_BUTTON_QSS
 
@@ -262,13 +297,12 @@ def area_from_slider(pos: int) -> float:
 
 
 def format_area(area: float) -> str:
-    """面積を px^2 と相当辺長で表示する。
+    """面積のしきい値を「一辺の長さ」で表示する。
 
-    px^2 はインスタンス一覧の表示と単位を揃えるため。ただし数値だけでは粒の
-    大きさが掴めないので、同じ面積の正方形の一辺を添える。
+    px² の生値は桁が大きく粒の大きさを掴みにくいので、同じ面積の正方形の
+    一辺に直して出す。「≤」を付けて、これ以下が選ばれることを一目で示す。
     """
-    side = area**0.5
-    return f"{int(area)} px² (≒{int(side)}px角)"
+    return f"≤ {int(area ** 0.5)}px角"
 
 
 def paint_min_area(radius: float) -> float:

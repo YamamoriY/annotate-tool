@@ -40,7 +40,7 @@ BRUSH_RADIUS = 12.0
 ERASER_RADIUS = 12.0  # 既定は筆と同じ太さ。別々に調整できるよう値は独立させる
 BRUSH_RADIUS_MIN = 2.0
 BRUSH_RADIUS_MAX = 60.0
-PAINT_COLOR = QColor(90, 220, 150, 150)  # 塗った領域の表示色(半透明)
+PAINT_COLOR = QColor(90, 220, 150, 100)  # 塗った領域の表示色(半透明)
 # 確定時にマスクを polygon 化するときのパラメータ(mask_polygon へ渡す)。
 PAINT_SIMPLIFY_EPSILON = 1.5  # approxPolyDP の許容誤差[px]。大きいほど点が減る。
 Z_ADD_DIM = 3.0  # 追加モードの暗幕(オーバーレイより上)

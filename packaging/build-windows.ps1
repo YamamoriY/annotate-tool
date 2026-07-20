@@ -1,13 +1,13 @@
 # Windows build script.
 #
-#   .\packaging\build-windows.ps1            # onedir (recommended for distribution)
-#   .\packaging\build-windows.ps1 -OneFile   # single exe
+#   .\packaging\build-windows.ps1            # single exe (default)
+#   .\packaging\build-windows.ps1 -OneDir    # onedir
 #
 # NOTE: messages are ASCII on purpose. Windows PowerShell 5.1 reads .ps1 files as
 # the ANSI codepage unless they carry a UTF-8 BOM, which garbles non-ASCII strings.
 
 param(
-    [switch]$OneFile
+    [switch]$OneDir
 )
 
 # PyInstaller writes progress to stderr; with "Stop" that alone aborts the script
@@ -26,12 +26,12 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "  icon generation failed - building without an updated icon" -ForegroundColor Yellow
 }
 
-$spec = if ($OneFile) { "packaging\annotate-tool-onefile.spec" } else { "packaging\annotate-tool.spec" }
+$spec = if ($OneDir) { "packaging\annotate-tool.spec" } else { "packaging\annotate-tool-onefile.spec" }
 
 # Outputs are split per-OS so a macOS build in the same tree does not clobber this one.
 Write-Host "building: $spec" -ForegroundColor Cyan
 uv run pyinstaller $spec --noconfirm --workpath build\win --distpath dist\win
 if ($LASTEXITCODE -ne 0) { throw "pyinstaller failed ($LASTEXITCODE)" }
 
-$out = if ($OneFile) { "dist\win\annotate-tool-onefile.exe" } else { "dist\win\annotate-tool\annotate-tool.exe" }
+$out = if ($OneDir) { "dist\win\annotate-tool\annotate-tool.exe" } else { "dist\win\annotate-tool-onefile.exe" }
 Write-Host "done: $out" -ForegroundColor Green

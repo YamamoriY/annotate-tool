@@ -47,6 +47,48 @@ def is_within(a: QPoint, b: QPoint, threshold: float) -> bool:
     return dx * dx + dy * dy <= threshold * threshold
 
 
+class _OverlayPolygonItem(QGraphicsPolygonItem):
+    """輪郭を二度描き(暗い縁 → 本線)するポリゴン。
+
+    既定の QGraphicsPolygonItem はペンを1本しか持てないので、縁取りのために
+    アイテムを二重に持つ代わりに描画側で二度打つ。当たり判定もアイテム数も
+    増えないぶん、選択まわりのコードには手を入れずに済む。
+    """
+
+    def __init__(self, polygon: QPolygonF) -> None:
+        super().__init__(polygon)
+        self._halo_pen: QPen | None = None
+
+    def set_halo_pen(self, pen: QPen | None) -> None:
+        self._halo_pen = pen
+        self.update()
+
+    def boundingRect(self) -> QRectF:
+        rect = super().boundingRect()
+        if self._halo_pen is None:
+            return rect
+        # 縁は本線より外へ張り出すぶん、既定の矩形では描画が欠ける
+        margin = style.HALO_EXTRA_WIDTH
+        return rect.adjusted(-margin, -margin, margin, margin)
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:  # noqa: ANN001
+        poly = self.polygon()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        brush = self.brush()
+        if brush.color().alpha() > 0:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(brush)
+            painter.drawPolygon(poly)
+
+        painter.setBrush(Qt.NoBrush)
+        if self._halo_pen is not None:
+            painter.setPen(self._halo_pen)
+            painter.drawPolygon(poly)
+        painter.setPen(self.pen())
+        painter.drawPolygon(poly)
+
+
 class ImageView(QGraphicsView):
     """ホイールでズーム、矩形ドラッグで複数選択できる画像表示ビュー。
 
@@ -84,7 +126,7 @@ class ImageView(QGraphicsView):
         self._dim_item: QGraphicsRectItem | None = None
         self._dim_forced = False  # 選択が空でも暗幕を出す(面積スライダー操作中)
         # インスタンス番号 -> そのインスタンスを構成するポリゴンアイテム群
-        self._items_by_index: list[list[QGraphicsPolygonItem]] = []
+        self._items_by_index: list[list[_OverlayPolygonItem]] = []
         self._show_fill = True
         self._selected: set[int] = set()
 
@@ -104,7 +146,7 @@ class ImageView(QGraphicsView):
         self._add_dim_item: QGraphicsRectItem | None = None
         self._last_paint_pt: QPointF | None = None
         # 修正中に隠しているポリゴンアイテム(モードを抜けたら戻す)
-        self._hidden_items: list[QGraphicsPolygonItem] = []
+        self._hidden_items: list[_OverlayPolygonItem] = []
         self._tool = Tool.BRUSH
         # 半径はツールごとに独立。スライダーで変わり、モードを跨いでも保持する。
         # パスには半径の概念が無いため、ここに Tool.POLYGON は入れない。
@@ -140,6 +182,20 @@ class ImageView(QGraphicsView):
 
         self.fit()
 
+    def clear_image(self) -> None:
+        """表示中の画像とオーバーレイを全て捨てる(何も開いていない状態)。
+
+        set_image と違い、次に置く画像が無いのでシーン矩形も畳む。残しておくと
+        空の領域へスクロール・ズームできてしまい、読み込み失敗と区別が付かない。
+        """
+        self._scene.clear()  # 中のアイテムは削除されるので参照を全て手放す
+        self._items_by_index = []
+        self._hidden_items = []
+        self._selected = set()
+        self._pixmap_item = None
+        self._dim_item = None
+        self._scene.setSceneRect(0, 0, 0, 0)
+
     def set_overlays(
         self,
         annotations: list[Annotation],
@@ -159,23 +215,39 @@ class ImageView(QGraphicsView):
 
         for idx, ann in enumerate(annotations):
             color = style.instance_color(idx)
-            items: list[QGraphicsPolygonItem] = []
+            items: list[_OverlayPolygonItem] = []
             for poly in ann.polygons():
                 qpoly = QPolygonF([QPointF(x, y) for x, y in poly])
-                item = QGraphicsPolygonItem(qpoly)
+                item = _OverlayPolygonItem(qpoly)
                 item.setData(0, idx)  # クリック時にインスタンスを特定するため
                 item.setPen(self._make_pen(color, selected=False))
+                item.set_halo_pen(self._make_halo_pen(selected=False))
                 item.setBrush(self._make_brush(color, selected=False))
                 self._scene.addItem(item)
                 items.append(item)
             self._items_by_index.append(items)
 
+    def _pen_width(self, selected: bool) -> float:
+        """本線の幅。塗りを消しているときは境界判定用に太くする。"""
+        if self._show_fill:
+            return style.SELECTED_PEN_WIDTH if selected else style.NORMAL_PEN_WIDTH
+        return (
+            style.CONTOUR_SELECTED_PEN_WIDTH
+            if selected
+            else style.CONTOUR_PEN_WIDTH
+        )
+
     def _make_pen(self, color: QColor, selected: bool) -> QPen:
         pen = QPen(color)
         pen.setCosmetic(True)  # ズームしても線幅を一定に保つ
-        pen.setWidthF(
-            style.SELECTED_PEN_WIDTH if selected else style.NORMAL_PEN_WIDTH
-        )
+        pen.setWidthF(self._pen_width(selected))
+        return pen
+
+    def _make_halo_pen(self, selected: bool) -> QPen:
+        """本線の下に敷く暗い縁。本線より太いぶんだけ外側へはみ出す。"""
+        pen = QPen(QColor(style.HALO_COLOR))
+        pen.setCosmetic(True)
+        pen.setWidthF(self._pen_width(selected) + style.HALO_EXTRA_WIDTH)
         return pen
 
     def _make_brush(self, color: QColor, selected: bool) -> QBrush:
@@ -239,6 +311,7 @@ class ImageView(QGraphicsView):
         color = style.instance_color(index)
         for item in self._items_by_index[index]:
             item.setPen(self._make_pen(color, selected))
+            item.set_halo_pen(self._make_halo_pen(selected))
             item.setBrush(self._make_brush(color, selected))
             item.setZValue(style.Z_SELECTED if raise_z else 0.0)
 
@@ -249,12 +322,17 @@ class ImageView(QGraphicsView):
                 item.setVisible(visible)
 
     def set_fill_visible(self, visible: bool) -> None:
-        """塗りの有無を切り替える。選択状態は維持したまま再スタイルする。"""
+        """塗りの有無を切り替える。選択状態は維持したまま再スタイルする。
+
+        塗りを消したときは線幅も変わる(_pen_width)ので、ペンごと引き直す。
+        """
         self._show_fill = visible
         for idx, items in enumerate(self._items_by_index):
             color = style.instance_color(idx)
             selected = idx in self._selected
             for item in items:
+                item.setPen(self._make_pen(color, selected))
+                item.set_halo_pen(self._make_halo_pen(selected))
                 item.setBrush(self._make_brush(color, selected))
 
     # --- ズーム / フィット / クリック ---------------------------------------

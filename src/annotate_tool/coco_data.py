@@ -49,12 +49,22 @@ class Category:
 class CocoDataset:
     """COCO JSON を読み込み、画像単位でアノテーションを引けるようにする。"""
 
-    def __init__(self, json_path: str | Path):
-        self.json_path = Path(json_path)
-        self.data_dir = self.json_path.parent
+    def __init__(self, json_path: str | Path | None = None):
+        """json_path=None は「まだ何も開いていない」空のデータセット。
+
+        起動直後(開くファイルが決まっていない)を表すために許している。
+        画像もアノテーションも空なので、以降の参照系は素直に空を返し、
+        save() は書き出す先が無いので何もしない。
+        """
+        self.json_path = Path(json_path) if json_path is not None else None
+        self.data_dir = self.json_path.parent if self.json_path else None
 
         # 保存時に元データの全フィールドを保つため、生の dict を保持しておく。
-        raw = json.loads(self.json_path.read_text(encoding="utf-8"))
+        raw: dict = (
+            json.loads(self.json_path.read_text(encoding="utf-8"))
+            if self.json_path
+            else {}
+        )
         self._raw = raw
         self.info: dict = raw.get("info", {})
         self.licenses: list = raw.get("licenses", [])
@@ -183,6 +193,8 @@ class CocoDataset:
         元データの全フィールドを保つため、生の dict から削除済みアノテーションだけを
         取り除いて書き戻す(id は COCO 内で一意である前提)。
         """
+        if self.json_path is None:
+            return  # 空のデータセット(書き出す先が無い)
         surviving = {ann.id for ann in self.annotations}
         self._raw["annotations"] = [
             a for a in self._raw.get("annotations", []) if a.get("id") in surviving

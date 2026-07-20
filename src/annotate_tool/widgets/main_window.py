@@ -17,6 +17,7 @@ from pathlib import Path
 
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
+    QFileDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -45,9 +46,11 @@ class ViewerWindow(QMainWindow):
         (shortcuts.TOOL_POLYGON, Tool.POLYGON),
     )
 
-    def __init__(self, dataset: CocoDataset):
+    def __init__(self, dataset: CocoDataset | None = None):
         super().__init__()
-        self.state = ViewerState(dataset, self)
+        # 何も渡されなければ空のデータセットで立ち上げる。開くファイルは
+        # 右パネルの「開く」で後から決められるので、起動を止める理由はない。
+        self.state = ViewerState(dataset or CocoDataset(), self)
         self.settings = settings.load()
         # キー割り当ては設定ファイルで差し替えられる。壊れた行は既定へ戻し、
         # 理由は起動後にステータスバーへ出す(起動は止めない)。
@@ -89,10 +92,7 @@ class ViewerWindow(QMainWindow):
 
         self._connect_signals()
 
-        if self.state.dataset.images:
-            self._load_image(self.state.image_index)
-        else:
-            self.statusBar().showMessage("画像がありません")
+        self._on_dataset_changed()  # 初期表示も「開いた直後」と同じ道を通す
 
         if self._keymap_problems:
             # 黙って既定へ戻すと「設定したのに効かない」と受け取られるため必ず出す。
@@ -152,8 +152,11 @@ class ViewerWindow(QMainWindow):
             # 編集モード中の画像送りは禁止(送ってしまうと塗りかけが失われる)
             shortcuts.PREV.id: lambda: not self.state.add_mode,
             shortcuts.NEXT.id: lambda: not self.state.add_mode,
+            # 塗る先の画像が無ければ追加もできない(データ未読込のとき)
             shortcuts.ADD.id: lambda: (
-                not self.state.add_mode and not self.state.selected_indices
+                not self.state.add_mode
+                and not self.state.selected_indices
+                and self.state.current_image() is not None
             ),
             # 塗り直す対象が決まるのは単一選択のときだけ
             shortcuts.EDIT.id: lambda: (
@@ -189,7 +192,19 @@ class ViewerWindow(QMainWindow):
 
     def _build_side_controls(self) -> None:
         """右パネルに現在の画像の情報と、操作グループを積む。"""
-        # 最上段は「いまどの画像か」と、その送り。見る対象と移動手段をまとめる。
+        # 最上段は「どのデータを開いているか」。ここが決まらないと他の操作は
+        # 何の意味も持たないので、画像より上に置く。
+        file_group = ControlGroup("ファイル")
+        file_group.add_button("COCO JSON を開く…", self._open_dataset_dialog)
+        self._path_label = QLabel()
+        self._path_label.setStyleSheet(style.CONTROL_HELP_QSS)
+        self._path_label.setWordWrap(True)  # パネル幅に収まらないため折り返す
+        # 表示専用。ただし選択はできるようにする(パスを他所へ貼れると助かる)。
+        self._path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        file_group.add_widget(self._path_label)
+        self.side_panel.add_widget(file_group)
+
+        # 次は「いまどの画像か」と、その送り。見る対象と移動手段をまとめる。
         image_group = ControlGroup("画像")
         self._info_label = QLabel()
         self._info_label.setStyleSheet(style.INFO_LABEL_QSS)
@@ -244,6 +259,58 @@ class ViewerWindow(QMainWindow):
         setting_group.add_button("キーボードショートカット ↗", self._open_settings_folder)
         self.side_panel.add_widget_bottom(setting_group)
 
+    # --- データセットを開く ---------------------------------------------------
+    def _open_dataset_dialog(self) -> None:
+        """COCO JSON をファイル選択で開く。
+
+        初期位置は今開いているファイルの隣。連番や派生ファイルを続けて開く
+        ことが多く、毎回同じ場所までたどり直すのは無駄なため。
+        """
+        current = self.state.dataset.json_path
+        start = str(current.parent) if current else ""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "COCO JSON を開く", start, "COCO JSON (*.json);;すべてのファイル (*)"
+        )
+        if path:
+            self.open_dataset(Path(path))
+
+    def open_dataset(self, path: Path) -> bool:
+        """COCO JSON を読み込んで表示を総入れ替えする。成功したら True。
+
+        読み込みに失敗しても今の内容は保ったままにする(壊れたファイルを
+        選んだだけで作業中の状態を失うのは割に合わない)。
+        """
+        try:
+            dataset = CocoDataset(path)
+        except (OSError, ValueError) as exc:
+            # ValueError は JSONDecodeError を含む(不正な JSON)
+            self.statusBar().showMessage(f"開けません: {path} ({exc})")
+            return False
+
+        # 遅延保存が残っていると、切り替えた後に前のデータへ書きに行ってしまう
+        self._flush_pending_save()
+        self.state.set_dataset(dataset)
+        # 次の起動でこれを開き直す。切り替えた時点で書き出す(終了時にまとめて
+        # 書くと、強制終了で失われる)。
+        settings.set_last_json(self.settings, str(path))
+        return True
+
+    def _on_dataset_changed(self) -> None:
+        """データセット差し替え後の表示の作り直し。"""
+        self._update_path_label()
+        if self.state.dataset.images:
+            self._load_image(self.state.image_index)
+        else:
+            # 前のデータの画像が残ると「開けた」ように見えてしまうので消す
+            self.view.clear_image()
+            self._refresh_overlays()
+            self.statusBar().showMessage("画像がありません")
+        self._apply_selection(self.state.selected_indices)
+
+    def _update_path_label(self) -> None:
+        path = self.state.dataset.json_path
+        self._path_label.setText(escape(str(path)) if path else "未選択")
+
     def _open_settings_folder(self) -> None:
         """設定ファイルの置き場をエクスプローラーで開く。
 
@@ -287,6 +354,7 @@ class ViewerWindow(QMainWindow):
         )
 
         # 状態 -> 表示
+        self.state.datasetChanged.connect(self._on_dataset_changed)
         self.state.imageChanged.connect(self._load_image)
         self.state.selectionChanged.connect(self._apply_selection)
         self.state.annotationsChanged.connect(self._refresh_overlays)
@@ -333,6 +401,9 @@ class ViewerWindow(QMainWindow):
                 f"<br><span style='{style.INFO_SUB_HTML}'>"
                 f"インスタンス数: {len(annotations)}</span>"
             )
+        else:
+            # 前のデータの画像名が残ると、何を見ているのか分からなくなる
+            self._info_label.setText("画像がありません")
 
     def _apply_selection(self, indices) -> None:
         self.view.set_selection(indices)
@@ -502,11 +573,19 @@ class ViewerWindow(QMainWindow):
         if not self._save_dirty:
             self._saving_label.clear()
 
-    def closeEvent(self, event) -> None:
-        # 遅延保存が残ったまま終了すると変更が失われるため、確実に書き出す
+    def _flush_pending_save(self) -> None:
+        """遅延保存が残っていれば、その場で書き出す。
+
+        終了時や、対象データセットが入れ替わる直前など「後で書く」が
+        成り立たなくなる場面で呼ぶ。
+        """
         if self._save_dirty:
             self._save_dirty = False
             self.state.flush_save()
+
+    def closeEvent(self, event) -> None:
+        # 遅延保存が残ったまま終了すると変更が失われるため、確実に書き出す
+        self._flush_pending_save()
         super().closeEvent(event)
 
     # --- ユーザー操作 -> 状態 -------------------------------------------------

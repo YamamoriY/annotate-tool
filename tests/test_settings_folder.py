@@ -17,6 +17,7 @@ from annotate_tool.widgets import main_window
 
 class StubDataset:
     images = [ImageEntry(1, "a.png", 10, 10)]
+    json_path = None  # パス表示用(このテストでは開いているファイルを問わない)
 
     def annotations_for(self, image_id: int) -> list:
         return []

@@ -32,6 +32,8 @@ class ViewerState(QObject):
     # 未保存の変更が生じた(実際のディスク保存は呼び出し側が遅延して行う)
     saveRequested = Signal()
 
+    datasetChanged = Signal()  # 別の COCO JSON を開いた(画像・一覧の総入れ替え)
+
     def __init__(self, dataset: CocoDataset, parent: QObject | None = None):
         super().__init__(parent)
         self._dataset = dataset
@@ -53,6 +55,21 @@ class ViewerState(QObject):
     @property
     def dataset(self) -> CocoDataset:
         return self._dataset
+
+    def set_dataset(self, dataset: CocoDataset) -> None:
+        """開いているデータセットを差し替える。
+
+        画像も選択も別物になるので、状態は起動直後と同じところまで戻す。
+        表示フラグ(オーバーレイ・塗り)はユーザーの好みなので引き継ぐ。
+        通知は datasetChanged 一本にまとめる。選択やアノテーションの変化を
+        個別に出すと、受け取り側が「もう無い画像」を見に行くことになるため。
+        """
+        self.cancel_add_mode()  # 塗りかけを別データへ持ち越さない
+        self._dataset = dataset
+        self._image_index = 0
+        self._selected = set()
+        self._invalidate_area_index()
+        self.datasetChanged.emit()
 
     @property
     def image_index(self) -> int:

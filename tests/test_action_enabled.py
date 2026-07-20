@@ -21,6 +21,8 @@ from annotate_tool.widgets.main_window import ViewerWindow
 class StubDataset:
     """ViewerWindow が dataset に求めるものだけを持つスタブ。"""
 
+    json_path = None  # パス表示用(このテストでは開いているファイルを問わない)
+
     def __init__(self, image_path: str = "missing.png"):
         self._image_path = image_path
         self.images = [ImageEntry(1, "a.png", 10, 10), ImageEntry(2, "b.png", 10, 10)]
@@ -173,18 +175,26 @@ def test_entry_tool_is_carried_over(window):
         window.state.cancel_add_mode()
 
 
-def test_info_label_sits_in_the_image_group(window):
-    """現在の画像の情報はステータスバーではなく、右パネル最上段の「画像」の中。"""
+def test_file_group_sits_at_the_top(window):
+    """最上段は「ファイル」。どのデータを開くかが決まらないと他は意味を持たない。"""
     group = window.side_panel.widget().layout().itemAt(0).widget()
     assert isinstance(group, ControlGroup)
-    assert group.findChild(QLabel).text() == "画像", "最上段は「画像」グループ"
+    assert group.findChild(QLabel).text() == "ファイル"
+    assert window._path_label.parent() is group
+
+
+def test_info_label_sits_in_the_image_group(window):
+    """現在の画像の情報はステータスバーではなく、「ファイル」の下の「画像」の中。"""
+    group = window.side_panel.widget().layout().itemAt(1).widget()
+    assert isinstance(group, ControlGroup)
+    assert group.findChild(QLabel).text() == "画像"
     assert window._info_label.parent() is group
     assert window._info_label not in window.statusBar().findChildren(QLabel)
 
 
 def test_image_group_holds_the_navigation_buttons(window):
     """画像送りも同じグループに入る(見る対象と移動手段をまとめる)。"""
-    group = window.side_panel.widget().layout().itemAt(0).widget()
+    group = window.side_panel.widget().layout().itemAt(1).widget()
     labels = [b.text() for b in group.findChildren(QPushButton)]
     assert len(labels) == 2 and any("前" in t for t in labels)
 

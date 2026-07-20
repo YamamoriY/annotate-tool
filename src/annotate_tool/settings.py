@@ -18,6 +18,9 @@ APPLICATION = "annotate-tool"
 KEY_CONFIRM_DELETE = "ui/confirm_delete"
 DEFAULT_CONFIRM_DELETE = True
 
+# 最後に開いた COCO JSON。次の起動でこれを開き直す(引数なしで起動できるように)。
+KEY_LAST_JSON = "io/last_json"
+
 
 def load() -> QSettings:
     """設定ファイルを開く。
@@ -81,3 +84,16 @@ def confirm_delete(settings: QSettings) -> bool:
 
 def set_confirm_delete(settings: QSettings, value: bool) -> None:
     settings.setValue(KEY_CONFIRM_DELETE, value)
+
+
+def last_json(settings: QSettings) -> str:
+    """最後に開いた COCO JSON のパス(未設定なら空文字)。
+
+    存在確認はしない。設定を書いた後にファイルが動く/消えることはあるので、
+    開けるかどうかは使う側が確かめる。
+    """
+    return settings.value(KEY_LAST_JSON, "", type=str)
+
+
+def set_last_json(settings: QSettings, path: str) -> None:
+    settings.setValue(KEY_LAST_JSON, path)

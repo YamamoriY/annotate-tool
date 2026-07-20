@@ -11,8 +11,9 @@ uv run src/main.py [path/to/instances.json]
 uv run annotate-tool [path/to/instances.json]
 ```
 
-引数を省略すると `data/instances.json` を読み込む。画像は JSON と同じディレクトリから
-`file_name` で解決される。
+引数を省略すると前回開いた JSON を開き直す。それも無ければ何も開かずに起動するので、
+右パネル最上段の「COCO JSON を開く…」で選ぶ(選んだパスは設定ファイルへ記録され、
+次の起動で開き直される)。画像は JSON と同じディレクトリから `file_name` で解決される。
 
 ## 操作
 

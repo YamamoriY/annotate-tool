@@ -277,10 +277,15 @@ class ViewerWindow(QMainWindow):
         if self.view.has_path():
             self.view.close_path()
             return
+        was_edit = self.state.editing_annotation() is not None
         polygons = self.view.painted_polygons()
         if polygons:
             self.state.apply_painted(polygons)
         self.state.cancel_add_mode()
+        # 修正から抜けると対象が選択へ戻る(取消時は都合が良い)。確定したときは
+        # 作業が済んだ合図として選択を外す。
+        if was_edit:
+            self.state.deselect()
 
     def _on_escape(self) -> None:
         # 編集モード中は塗りを破棄して抜ける。通常時は選択解除。

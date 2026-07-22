@@ -69,6 +69,7 @@ class ViewerWindow(QMainWindow):
         self.resize(*style.WINDOW_SIZE)
 
         self.view = ImageView(self)
+        self.view.set_touchpad_mode(settings.touchpad_mode(self.settings))
         self.setCentralWidget(self.view)
         self.action_bar = FloatingActionBar(self.view, self.keymap)
         self.add_bar = AddBar(self.view, self.keymap)
@@ -219,12 +220,6 @@ class ViewerWindow(QMainWindow):
         )
         self.side_panel.add_widget(image_group)
 
-        guide = ControlGroup("操作方法")
-        guide.add_text("左ドラッグ： 範囲選択")
-        guide.add_text("中ドラッグ： 画像の移動")
-        guide.add_text("ホイール： ズーム")
-        self.side_panel.add_widget(guide)
-
         display = ControlGroup("表示")
         display.add_button(self.keymap.text(shortcuts.FIT), self.view.fit)
         self._overlay_btn = display.add_button(
@@ -252,6 +247,18 @@ class ViewerWindow(QMainWindow):
         )
         self.side_panel.add_widget(select)
 
+        # 操作方法は設定のすぐ上(右下)に固定する。案内文はタッチパッドモードで
+        # 内容が変わるため空のラベルで作り、_update_guide_texts が書き込む。
+        # モードの切替も「操作の説明が変わるスイッチ」なので、この欄の末尾に置く。
+        guide = ControlGroup("操作方法")
+        self._guide_lines = [guide.add_text("") for _ in range(3)]
+        self._touchpad_box = guide.add_checkbox(
+            "タッチパッドモード",
+            checked=settings.touchpad_mode(self.settings),
+        )
+        self._touchpad_box.toggled.connect(self._on_touchpad_mode_toggled)
+        self.side_panel.add_widget_bottom(guide)
+
         setting_group = ControlGroup("設定")
         self._confirm_delete_box = setting_group.add_checkbox(
             "削除時に確認メッセージを表示",
@@ -264,6 +271,31 @@ class ViewerWindow(QMainWindow):
         # ↗ は「別の場所(エクスプローラー)が開く」ことを示す慣用のしるし
         setting_group.add_button("キーボードショートカット ↗", self._open_settings_folder)
         self.side_panel.add_widget_bottom(setting_group)
+
+        self._update_guide_texts()
+
+    def _on_touchpad_mode_toggled(self, checked: bool) -> None:
+        """タッチパッドモードの切替。ビューへ反映し、その場で書き出す。"""
+        settings.set_touchpad_mode(self.settings, checked)
+        self.view.set_touchpad_mode(checked)
+        self._update_guide_texts()
+
+    def _update_guide_texts(self) -> None:
+        """操作方法の案内。タッチパッドモードで操作の意味が変わるため追従させる。"""
+        if self._touchpad_box.isChecked():
+            lines = (
+                "範囲選択： 左ドラッグ",
+                "移動： スクロール / Space+ドラッグ",
+                "ズーム： ピンチ / Ctrl+ホイール",
+            )
+        else:
+            lines = (
+                "範囲選択： 左ドラッグ",
+                "移動： 中ドラッグ / Space+ドラッグ",
+                "ズーム： ホイール",
+            )
+        for label, text in zip(self._guide_lines, lines):
+            label.setText(text)
 
     # --- データセットを開く ---------------------------------------------------
     def _open_dataset_dialog(self) -> None:

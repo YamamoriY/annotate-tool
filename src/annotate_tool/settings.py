@@ -18,6 +18,13 @@ APPLICATION = "annotate-tool"
 KEY_CONFIRM_DELETE = "ui/confirm_delete"
 DEFAULT_CONFIRM_DELETE = True
 
+# タッチパッドモード。ON でホイール(2本指スクロール)がパンになり、ズームは
+# Ctrl+ホイール(タッチパッドのピンチはこれに合成される)で行う。OFF なら従来
+# どおりホイール=ズーム。マウスとタッチパッドはイベントだけでは確実に区別
+# できない(特に Windows)ため、どちらの流儀で読むかをユーザーに決めてもらう。
+KEY_TOUCHPAD_MODE = "ui/touchpad_mode"
+DEFAULT_TOUCHPAD_MODE = False
+
 # 最後に開いた COCO JSON。次の起動でこれを開き直す(引数なしで起動できるように)。
 KEY_LAST_JSON = "io/last_json"
 
@@ -84,6 +91,15 @@ def confirm_delete(settings: QSettings) -> bool:
 
 def set_confirm_delete(settings: QSettings, value: bool) -> None:
     settings.setValue(KEY_CONFIRM_DELETE, value)
+
+
+def touchpad_mode(settings: QSettings) -> bool:
+    # Windows では bool が文字列で返ることがあるため type= を必ず付ける
+    return settings.value(KEY_TOUCHPAD_MODE, DEFAULT_TOUCHPAD_MODE, type=bool)
+
+
+def set_touchpad_mode(settings: QSettings, value: bool) -> None:
+    settings.setValue(KEY_TOUCHPAD_MODE, value)
 
 
 def last_json(settings: QSettings) -> str:

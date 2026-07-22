@@ -11,7 +11,7 @@ import math
 from collections.abc import Iterable
 
 import numpy as np
-from PySide6.QtCore import QLineF, QPoint, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QLineF, QPoint, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -131,7 +131,10 @@ class _OverlayLayerItem(QGraphicsItem):
 class ImageView(QGraphicsView):
     """ホイールでズーム、矩形ドラッグで複数選択できる画像表示ビュー。
 
-    左ドラッグは矩形選択(触れたインスタンスを選択に追加)、パンは中ボタンドラッグ。
+    左ドラッグは矩形選択(触れたインスタンスを選択に追加)。パンは中ボタン
+    ドラッグと Space+左ドラッグ。タッチパッドモード(set_touchpad_mode)では
+    ホイール(2本指スクロール)がパンになり、ズームは Ctrl+ホイールで行う。
+    macOS のピンチジェスチャはモードに関わらず常にズーム。
     """
 
     # 単一クリック: (インスタンス番号, additive=Shift)
@@ -192,8 +195,11 @@ class ImageView(QGraphicsView):
 
         # 操作状態
         self._press_pos: QPoint | None = None  # 左押下位置(クリック/ドラッグ判定用)
-        self._panning = False  # 中ボタンによるパン中か
+        self._panning = False  # ドラッグパン中か(中ボタン / Space+左)
+        self._pan_button: Qt.MouseButton | None = None  # パンを始めたボタン
         self._pan_origin: QPoint | None = None  # パン開始時のマウス位置
+        self._space_down = False  # Space 押下中(押している間は左ドラッグがパン)
+        self._touchpad_mode = False  # ホイールをパンとして読む(ズームは Ctrl+ホイール)
 
         # 追加(塗りつぶし)モード。塗りは QPainterPath ではなく画像サイズのラスタ
         # マスク(_mask_image)へ焼き込む。塗るコストは筆の周辺だけに収まり、塗った
@@ -473,12 +479,49 @@ class ImageView(QGraphicsView):
             self._apply_cursor()  # 倍率が変わったのでブラシ円を作り直す
         self._maybe_rerender_layer()
 
-    def wheelEvent(self, event) -> None:
-        factor = style.ZOOM_STEP if event.angleDelta().y() > 0 else 1 / style.ZOOM_STEP
+    def set_touchpad_mode(self, enabled: bool) -> None:
+        """タッチパッドモード。ON でホイール(2本指スクロール)をパンとして読む。
+
+        ズームは Ctrl+ホイールで行う(Windows のタッチパッドはピンチを
+        Ctrl+ホイールへ合成して届けるので、これがピンチ対応も兼ねる)。
+        OFF なら従来どおりホイール=ズーム。
+        """
+        self._touchpad_mode = enabled
+
+    def _zoom_by(self, factor: float) -> None:
+        """倍率 factor でズームする(ホイール・ピンチ共通の入口)。"""
+        if factor <= 0.0 or factor == 1.0:
+            return
         self.scale(factor, factor)
         if self._add_mode:
             self._apply_cursor()  # 倍率が変わったのでブラシ円を作り直す
         self._maybe_rerender_layer()
+
+    def wheelEvent(self, event) -> None:
+        if self._touchpad_mode and not (event.modifiers() & Qt.ControlModifier):
+            # 2本指スクロール=パン。ピクセル単位が取れる環境(macOS)はそのまま
+            # 使い、取れない環境はノッチ角度から換算する(1 ノッチ = 60px)。
+            delta = event.pixelDelta()
+            if delta.isNull():
+                delta = event.angleDelta() / 2
+            self._pan_by(delta)
+            event.accept()
+            return
+        # ズーム。1 ノッチ(角度 120)で ZOOM_STEP 倍。タッチパッドのピンチは
+        # Ctrl+ホイールの細かい刻みとして届くため、指数で連続化しておくと
+        # そのまま滑らかなズームになる(普通のマウスでは従来と同じ挙動)。
+        self._zoom_by(style.ZOOM_STEP ** (event.angleDelta().y() / 120.0))
+
+    def viewportEvent(self, event) -> bool:
+        # macOS のタッチパッドのピンチ。タッチパッドモードの ON/OFF に関わらず
+        # ズームとして扱う(ピンチにズーム以外の解釈は無いため)。
+        if (
+            event.type() == QEvent.Type.NativeGesture
+            and event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture
+        ):
+            self._zoom_by(1.0 + event.value())
+            return True
+        return super().viewportEvent(event)
 
     def scrollContentsBy(self, dx: int, dy: int) -> None:
         super().scrollContentsBy(dx, dy)
@@ -712,10 +755,15 @@ class ImageView(QGraphicsView):
     def _apply_cursor(self) -> None:
         """現在のモードとツールに合ったカーソルを出す。
 
-        カーソルを変える必要がある箇所(モード切替・ツール切替・ズーム・パン終了)は
-        すべてここを通す。個別に setCursor すると分岐の追加漏れが起きるため。
+        カーソルを変える必要がある箇所(モード切替・ツール切替・ズーム・パンや
+        Space の押し離し)はすべてここを通す。個別に setCursor すると分岐の
+        追加漏れが起きるため。
         """
-        if not self._add_mode:
+        if self._panning:
+            self.setCursor(Qt.ClosedHandCursor)
+        elif self._space_down:
+            self.setCursor(Qt.OpenHandCursor)  # 「ここから掴んでパンできる」の合図
+        elif not self._add_mode:
             self.unsetCursor()
         elif self._tool is Tool.POLYGON:
             self.setCursor(Qt.CrossCursor)  # パスは太さが無いので円を出さない
@@ -989,11 +1037,47 @@ class ImageView(QGraphicsView):
             min_area=style.paint_min_area(self._min_paint_radius),
         )
 
-    # --- パン(中ボタンドラッグ)----------------------------------------------
+    # --- パン(中ボタン / Space+左ドラッグ / タッチパッドスクロール)-----------
     def _pan_by(self, delta: QPoint) -> None:
         h, v = self.horizontalScrollBar(), self.verticalScrollBar()
         h.setValue(h.value() - delta.x())
         v.setValue(v.value() - delta.y())
+
+    def _start_pan(self, event) -> None:
+        """ドラッグパンを始める。終わりはボタンの release(_pan_button で対応を取る)。"""
+        self._panning = True
+        self._pan_button = event.button()
+        self._pan_origin = event.pos()
+        self._apply_cursor()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            # Space を押している間は左ドラッグがパンになる(各種ツール共通の操作)。
+            # Space がショートカットに割り当てられている場合はそちらが先に
+            # イベントを取るため、ここへは届かない(ショートカット優先)。
+            self._space_down = True
+            self._apply_cursor()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event) -> None:
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            self._space_down = False
+            # パン中に離した場合はドラッグが続いているので、カーソルは
+            # release 時に _apply_cursor が戻す(_panning が先に判定される)。
+            self._apply_cursor()
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
+
+    def focusOutEvent(self, event) -> None:
+        # ウィンドウ切替などで Space の release を取りこぼすと押しっぱなし扱いに
+        # なるため、フォーカスを失ったら必ず解除する。
+        super().focusOutEvent(event)
+        if self._space_down:
+            self._space_down = False
+            self._apply_cursor()
 
     # --- クリック / 矩形選択 --------------------------------------------------
     def _instance_at(self, pos: QPoint) -> int | None:
@@ -1006,11 +1090,11 @@ class ImageView(QGraphicsView):
         return None
 
     def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MiddleButton:
-            # 中ボタンドラッグでパン(追加モードでも使える)
-            self._panning = True
-            self._pan_origin = event.pos()
-            self.setCursor(Qt.ClosedHandCursor)
+        if event.button() == Qt.MiddleButton or (
+            event.button() == Qt.LeftButton and self._space_down
+        ):
+            # 中ボタン / Space+左ドラッグでパン(追加モードでも使える)
+            self._start_pan(event)
             event.accept()
             return
         if self._add_mode and self._is_path_tool and event.button() == Qt.LeftButton:
@@ -1061,10 +1145,12 @@ class ImageView(QGraphicsView):
         super().mouseDoubleClickEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
-        if event.button() == Qt.MiddleButton and self._panning:
+        if self._panning and event.button() == self._pan_button:
             self._panning = False
+            self._pan_button = None
             self._pan_origin = None
-            self._apply_cursor()  # 追加モード中は描画用カーソルへ戻す
+            # Space 押下が続いていれば開いた手、追加モード中は描画用カーソルへ戻す
+            self._apply_cursor()
             event.accept()
             return
 

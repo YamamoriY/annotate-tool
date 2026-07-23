@@ -73,8 +73,12 @@ class ViewerWindow(QMainWindow):
         self.setCentralWidget(self.view)
         self.action_bar = FloatingActionBar(self.view, self.keymap)
         self.add_bar = AddBar(self.view, self.keymap)
-        # 左上。追加モード中だけ出す
-        self.tool_panel = ToolPanel(self.view, self.keymap)
+        # 左上。追加モード中だけ出す。太さは前回終了時のものを引き継ぐ
+        # (スライダーは初期化中にシグナルを出さないため、ビューへは自分で渡す)。
+        radii = settings.tool_radii(self.settings)
+        self.tool_panel = ToolPanel(self.view, self.keymap, radii)
+        for tool, radius in radii.items():
+            self.view.set_radius(tool, radius)
 
         self.panel = InstancePanel(self)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.panel)
@@ -395,6 +399,7 @@ class ViewerWindow(QMainWindow):
         self.add_bar.cancelClicked.connect(self.state.cancel_add_mode)
         self.tool_panel.toolChanged.connect(self._on_tool_changed)
         self.tool_panel.radiusChanged.connect(self.view.set_radius)
+        self.tool_panel.radiusChanged.connect(self._on_radius_changed)
         self.add_bar.confirmClicked.connect(self._confirm_add)
         # 面積スライダーは「もう一つの選択ソース」。つまみを動かさず触っただけでも
         # 選び直せるよう sliderPressed も拾う。
@@ -537,6 +542,14 @@ class ViewerWindow(QMainWindow):
         self.view.set_tool(tool)
         self._update_actions()
 
+    def _on_radius_changed(self, tool: Tool, radius: float) -> None:
+        """変えた太さは次回の起動でも使えるよう覚えておく。
+
+        書き出し自体は QSettings が溜めてから行うため、つまみを動かすたびに
+        呼んでもファイル I/O は都度発生しない。
+        """
+        settings.set_tool_radius(self.settings, tool, radius)
+
     def _adjust_brush_radius(self, delta: float) -> None:
         """選択中のブラシ / 消しゴムを細く、または太くする。"""
         shortcut = shortcuts.BRUSH_SMALLER if delta < 0 else shortcuts.BRUSH_LARGER
@@ -654,6 +667,7 @@ class ViewerWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         # 遅延保存が残ったまま終了すると変更が失われるため、確実に書き出す
         self._flush_pending_save()
+        settings.flush(self.settings)  # 太さなど、溜めたままの設定も書き出す
         super().closeEvent(event)
 
     # --- ユーザー操作 -> 状態 -------------------------------------------------

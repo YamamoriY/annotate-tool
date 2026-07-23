@@ -207,7 +207,7 @@ def test_brush_size_shortcuts_stop_at_slider_limits(window):
 
 def test_brush_size_hint_is_shown_beside_each_slider(window):
     for slider in window.tool_panel._sliders.values():
-        assert slider._shortcut_label.text() == "[ / ]"
+        assert slider._shortcut_label.text() == "細 [  太 ]"
         assert "細く" in slider._shortcut_label.toolTip()
         assert "太く" in slider._shortcut_label.toolTip()
 

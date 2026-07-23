@@ -32,7 +32,12 @@ class ToolPanel(QWidget):
     toolChanged = Signal(object)  # Tool
     radiusChanged = Signal(object, float)  # (Tool, 半径)
 
-    def __init__(self, view: QAbstractScrollArea, keymap: shortcuts.Keymap):
+    def __init__(
+        self,
+        view: QAbstractScrollArea,
+        keymap: shortcuts.Keymap,
+        radii: dict[Tool, float] | None = None,
+    ):
         super().__init__(view)
         self._view = view
         # ビューのブラシ円カーソルを継承しないよう、パネル上は通常の矢印に戻す。
@@ -49,10 +54,20 @@ class ToolPanel(QWidget):
         self._buttons: dict[Tool, QPushButton] = {}
         self._sliders: dict[Tool, BrushSlider] = {}
 
+        # 初期の太さは呼び出し側(前回値を設定から読む)が渡す。渡されなければ既定。
+        radii = radii or {}
         # 半径が None のツールは太さを持たない(パス)。その行はボタンだけ置く。
         rows = (
-            (Tool.BRUSH, keymap.text(shortcuts.TOOL_BRUSH), style.BRUSH_RADIUS),
-            (Tool.ERASER, keymap.text(shortcuts.TOOL_ERASER), style.ERASER_RADIUS),
+            (
+                Tool.BRUSH,
+                keymap.text(shortcuts.TOOL_BRUSH),
+                radii.get(Tool.BRUSH, style.BRUSH_RADIUS),
+            ),
+            (
+                Tool.ERASER,
+                keymap.text(shortcuts.TOOL_ERASER),
+                radii.get(Tool.ERASER, style.ERASER_RADIUS),
+            ),
             (Tool.POLYGON, keymap.text(shortcuts.TOOL_POLYGON), None),
         )
         for row, (tool, text, radius) in enumerate(rows):

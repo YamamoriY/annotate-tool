@@ -54,7 +54,7 @@ class BrushSlider(QWidget):
 
         # キーは設定で差し替えられるため、固定文字列ではなく Keymap 由来の表示を
         # ToolPanel から受け取る。方向の説明は常時出すと横長になるので tooltip へ。
-        self._shortcut_label = QLabel(f"{smaller_hint} / {larger_hint}", self)
+        self._shortcut_label = QLabel(f"細 {smaller_hint}  太 {larger_hint}", self)
         self._shortcut_label.setStyleSheet(style.BRUSH_SHORTCUT_HINT_QSS)
         self._shortcut_label.setToolTip(
             f"{smaller_hint}：細くする\n{larger_hint}：太くする"

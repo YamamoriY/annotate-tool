@@ -12,6 +12,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import QSettings
 
+from annotate_tool import style
+from annotate_tool.tools import Tool
+
 ORGANIZATION = "tree-log"
 APPLICATION = "annotate-tool"
 
@@ -27,6 +30,18 @@ DEFAULT_TOUCHPAD_MODE = False
 
 # 最後に開いた COCO JSON。次の起動でこれを開き直す(引数なしで起動できるように)。
 KEY_LAST_JSON = "io/last_json"
+
+# 筆・消しゴムの太さ(半径 px)。使う人ごとに好みの太さが決まっていることが
+# 多いので、起動のたびに既定へ戻らないよう覚えておく。太さを持たないツール
+# (パス)はここに入れない。
+KEY_TOOL_RADIUS = {
+    Tool.BRUSH: "ui/brush_radius",
+    Tool.ERASER: "ui/eraser_radius",
+}
+DEFAULT_TOOL_RADIUS = {
+    Tool.BRUSH: style.BRUSH_RADIUS,
+    Tool.ERASER: style.ERASER_RADIUS,
+}
 
 
 def load() -> QSettings:
@@ -113,3 +128,27 @@ def last_json(settings: QSettings) -> str:
 
 def set_last_json(settings: QSettings, path: str) -> None:
     settings.setValue(KEY_LAST_JSON, path)
+
+
+def tool_radii(settings: QSettings) -> dict[Tool, float]:
+    """筆・消しゴムの太さ(未設定・壊れた値なら既定値)。
+
+    手で書き換えられるファイルなので、数値にならない値や範囲外は既定・上下限へ
+    寄せる。ここで直しておけば、以降は普通の値として扱える。
+    """
+    radii: dict[Tool, float] = {}
+    for tool, key in KEY_TOOL_RADIUS.items():
+        default = DEFAULT_TOOL_RADIUS[tool]
+        try:
+            value = float(settings.value(key, default))
+        except (TypeError, ValueError):
+            value = default  # 数値として読めない行は無かったことにする
+        radii[tool] = max(style.BRUSH_RADIUS_MIN, min(value, style.BRUSH_RADIUS_MAX))
+    return radii
+
+
+def set_tool_radius(settings: QSettings, tool: Tool, radius: float) -> None:
+    """太さを覚える。太さを持たないツールでは何もしない。"""
+    key = KEY_TOOL_RADIUS.get(tool)
+    if key is not None:
+        settings.setValue(key, float(radius))

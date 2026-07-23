@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import QPoint, QPointF
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
@@ -247,3 +247,58 @@ def test_undo_point_follows_the_drawn_path(window):
 
     window.view.undo_path_point()
     assert not enabled(window, shortcuts.UNDO_POINT)  # 打つ前へ戻った
+
+
+def brush_stroke(view, pt: QPointF) -> None:
+    """mousePress/Release の塗り分岐と同じ順序でブラシの一筆を打つ。"""
+    view._painting = True
+    view._begin_stroke()
+    view._paint_to(pt)
+    if not view._paint_started:
+        view._paint_started = True
+        view.paintStarted.emit()
+    view._painting = False
+    view._last_paint_pt = None
+    view._end_stroke()
+
+
+def test_undo_follows_brush_strokes(window):
+    """一筆の増減も maskHistoryChanged 経由で「取消」の可否に追従する。"""
+    window.state.enter_add_mode()
+    assert not enabled(window, shortcuts.UNDO_POINT)  # まだ塗っていない
+
+    brush_stroke(window.view, QPointF(3, 3))
+    assert enabled(window, shortcuts.UNDO_POINT)
+
+    window.view.undo_mask()
+    assert not enabled(window, shortcuts.UNDO_POINT)  # 塗る前へ戻った
+
+
+def test_vertex_undo_takes_priority_over_stroke_undo(window):
+    """作図中の Ctrl+Z は従来どおり頂点を取り消す。一筆の履歴はその後。"""
+    window.state.enter_add_mode()
+    brush_stroke(window.view, QPointF(3, 3))
+    window.view._add_path_point(QPoint(1, 1))
+
+    window._undo()
+    assert not window.view.has_path(), "先に頂点が消える"
+    assert window.view.has_mask_history(), "一筆はまだ残っている"
+
+    window._undo()
+    assert not window.view.has_mask_history()
+
+
+def test_undo_disabled_at_prefill_baseline(window):
+    """既存アノテの修正モードでは、プリフィルより過去へは戻れない。"""
+    window.state.enter_edit_mode(0)
+    assert window.state.add_mode
+    assert not enabled(window, shortcuts.UNDO_POINT)
+
+
+def test_mask_history_dies_with_the_session(window):
+    window.state.enter_add_mode()
+    brush_stroke(window.view, QPointF(3, 3))
+    window.state.cancel_add_mode()
+
+    window.state.enter_add_mode()
+    assert not enabled(window, shortcuts.UNDO_POINT)

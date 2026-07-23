@@ -50,7 +50,8 @@ BLINK = Shortcut("blink", "点滅", ("C",))
 ESCAPE = Shortcut("escape", "選択解除", ("Esc",))
 # 作図中はパスを閉じる動作が優先される。Enter も従来どおり効く。
 CONFIRM = Shortcut("confirm", "確定", ("S", "Return", "Enter"))
-UNDO_POINT = Shortcut("undo_point", "頂点を取消", ("Ctrl+Z", "Backspace"))
+# 作図中は頂点を、そうでなければ直前の一筆を取り消す(id は互換のため据え置き)
+UNDO_POINT = Shortcut("undo_point", "取消", ("Ctrl+Z", "Backspace"))
 DELETE = Shortcut("delete", "削除", ("Delete",))
 # 描画ツールの切り替え(追加モード中のみ)。左手で 1/2/3 を押し分ける想定。
 TOOL_BRUSH = Shortcut("tool_brush", "ブラシ", ("1",))

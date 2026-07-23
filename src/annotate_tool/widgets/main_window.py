@@ -140,7 +140,7 @@ class ViewerWindow(QMainWindow):
         make(shortcuts.BLINK, self.state.toggle_blink)
         make(shortcuts.ESCAPE, self._on_escape)
         make(shortcuts.CONFIRM, self._confirm_add)
-        make(shortcuts.UNDO_POINT, self._undo_path_point)
+        make(shortcuts.UNDO_POINT, self._undo)
         make(shortcuts.DELETE, self._delete_selected)
         for shortcut, tool in self._TOOL_SHORTCUTS:
             # triggered は checked を渡してくるので受け流す
@@ -169,9 +169,8 @@ class ViewerWindow(QMainWindow):
             # 抜けたいときは Esc。
             shortcuts.CONFIRM.id: lambda: self.state.add_mode
             and (self._painting_started or self.view.has_path()),
-            shortcuts.UNDO_POINT.id: lambda: (
-                self.state.add_mode and self.view.has_path()
-            ),
+            shortcuts.UNDO_POINT.id: lambda: self.state.add_mode
+            and (self.view.has_path() or self.view.has_mask_history()),
             shortcuts.DELETE.id: lambda: bool(self.state.selected_indices),
         }
         # ツールの持ち替えは、ツールパネルが出ている追加モード中だけ
@@ -374,6 +373,8 @@ class ViewerWindow(QMainWindow):
         self.view.paintCleared.connect(self._on_paint_cleared)
         # 頂点の増減で「頂点を取消」の可否が変わる(マウス操作で起きるため通知が要る)
         self.view.pathChanged.connect(self._update_actions)
+        # 一筆の履歴の増減でも「取消」の可否が変わる
+        self.view.maskHistoryChanged.connect(self._update_actions)
         self.panel.selectionChanged.connect(self._on_panel_selection)
         self.action_bar.deselectClicked.connect(self.state.deselect)
         self.action_bar.editClicked.connect(self._edit_selected)
@@ -535,14 +536,17 @@ class ViewerWindow(QMainWindow):
         self._painting_started = False
         self._update_top_bar()  # 消し切ったら「確定」を引っ込める
 
-    def _undo_path_point(self) -> None:
-        """作図中のパスの直前の頂点を取り消す。
-
-        作図中のときだけ効く。将来アプリ全体の undo を入れるなら、
-        作図中でない場合の分岐をここへ足すこと。
+    def _undo(self) -> None:
+        """作図中はパスの頂点を、そうでなければ直前の一筆(またはパス閉じ)を
+        取り消す。編集モードの外には効かない(アプリ全体の undo を入れるなら
+        ここへ分岐を足すこと)。
         """
-        if self._can(shortcuts.UNDO_POINT):
+        if not self._can(shortcuts.UNDO_POINT):
+            return
+        if self.view.has_path():
             self.view.undo_path_point()
+        else:
+            self.view.undo_mask()
 
     def _confirm_add(self) -> None:
         """塗った領域を確定する(新規追加、または修正対象の差し替え)。

@@ -11,7 +11,17 @@ import math
 from collections.abc import Iterable
 
 import numpy as np
-from PySide6.QtCore import QEvent, QLineF, QPoint, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QEvent,
+    QLineF,
+    QPoint,
+    QPointF,
+    QRect,
+    QRectF,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -151,6 +161,8 @@ class ImageView(QGraphicsView):
     # 頂点はマウス操作で増減するため、これが無いとウィンドウ側は
     # 「取消できるか」を知る手段が無い。
     pathChanged = Signal()
+    # 一筆の取り消し履歴が増減した(has_mask_history() の結果が変わりうる)。
+    maskHistoryChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -221,6 +233,16 @@ class ImageView(QGraphicsView):
             Tool.ERASER: style.ERASER_RADIUS,
         }
         self._min_paint_radius = style.BRUSH_RADIUS_MAX  # この回で使った最も細い筆
+
+        # 一筆単位の取り消し履歴。各エントリは「その一筆が触れた矩形」と、
+        # 塗る前のその領域の画素、および直前の _paint_started / _min_paint_radius。
+        # マスク全面は保存しない(大画像でメモリが持たないため)。
+        self._mask_history: list[tuple[QRect, QImage, bool, float]] = []
+        self._mask_history_bytes = 0
+        self._stroke_backup: QImage | None = None  # 一筆の間だけ持つ全面コピー
+        self._stroke_rect = QRectF()  # この一筆が触れた範囲の累積
+        self._stroke_prev_started = False
+        self._stroke_prev_min_radius = style.BRUSH_RADIUS_MAX
 
         # パス(頂点クリック)ツールの作図中状態。閉じた時点でマスクへ焼くので、
         # ここにあるのは一時的な見た目だけ。頂点は確定後まで持ち越さない。
@@ -796,6 +818,7 @@ class ImageView(QGraphicsView):
     def _clear_paint(self) -> None:
         """塗り・暗幕アイテムをシーンから取り除き、マスクを捨てる。"""
         self._clear_path()
+        self._clear_mask_history()
         for attr in ("_paint_item", "_add_dim_item"):
             item = getattr(self, attr)
             if item is not None:
@@ -804,6 +827,86 @@ class ImageView(QGraphicsView):
         self._mask_image = None
         self._last_paint_pt = None
         self._min_paint_radius = style.BRUSH_RADIUS_MAX
+
+    # --- 一筆単位の取り消し履歴 ----------------------------------------------
+    def has_mask_history(self) -> bool:
+        """取り消せる一筆(またはパス閉じ)があるか。"""
+        return bool(self._mask_history)
+
+    def _begin_stroke(self) -> None:
+        """一筆の開始。塗る前のマスク全面と関連状態を控える。
+
+        触れる範囲は離すまで分からないので、いったん全面をコピーし、
+        _end_stroke で触れた矩形だけに切り詰めて履歴へ入れる。
+        """
+        if self._mask_image is None:
+            return
+        self._stroke_backup = self._mask_image.copy()
+        self._stroke_rect = QRectF()
+        self._stroke_prev_started = self._paint_started
+        self._stroke_prev_min_radius = self._min_paint_radius
+
+    def _end_stroke(self) -> None:
+        """一筆の終わり。触れた矩形の直前画素だけを履歴へ積む。"""
+        backup = self._stroke_backup
+        self._stroke_backup = None
+        if backup is None or self._mask_image is None:
+            return
+        rect = self._stroke_rect.toAlignedRect().intersected(self._mask_image.rect())
+        if rect.isEmpty():
+            return
+        region = backup.copy(rect)
+        # 画素が変わっていない一筆(空白への消しゴム等)は履歴に積まない。
+        # QImage の == はピクセル比較。
+        if region == self._mask_image.copy(rect):
+            return
+        self._push_history(
+            rect, region, self._stroke_prev_started, self._stroke_prev_min_radius
+        )
+
+    def _push_history(
+        self, rect: QRect, region: QImage, prev_started: bool, prev_min_radius: float
+    ) -> None:
+        self._mask_history.append((rect, region, prev_started, prev_min_radius))
+        self._mask_history_bytes += rect.width() * rect.height() * 4
+        while self._mask_history and (
+            len(self._mask_history) > style.MASK_UNDO_LIMIT
+            or self._mask_history_bytes > style.MASK_UNDO_MAX_BYTES
+        ):
+            old_rect, *_ = self._mask_history.pop(0)
+            self._mask_history_bytes -= old_rect.width() * old_rect.height() * 4
+        self.maskHistoryChanged.emit()
+
+    def _clear_mask_history(self) -> None:
+        self._stroke_backup = None
+        if not self._mask_history:
+            return
+        self._mask_history = []
+        self._mask_history_bytes = 0
+        self.maskHistoryChanged.emit()
+
+    def undo_mask(self) -> None:
+        """直前の一筆(またはパス閉じ)を取り消す。"""
+        # 塗っている最中の Ctrl+Z は無視する(控えの整合が崩れるため)。
+        if self._painting or not self._mask_history or self._mask_image is None:
+            return
+        rect, region, prev_started, prev_min_radius = self._mask_history.pop()
+        self._mask_history_bytes -= rect.width() * rect.height() * 4
+        painter = QPainter(self._mask_image)
+        # クリアされていた画素も正確に戻すため Source で上書きする
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.drawImage(rect.topLeft(), region)
+        painter.end()
+        if self._paint_item is not None:
+            self._paint_item.update(QRectF(rect))
+        was_started = self._paint_started
+        self._paint_started = prev_started
+        self._min_paint_radius = prev_min_radius
+        if prev_started and not was_started:
+            self.paintStarted.emit()  # 全消しの取り消し。「確定」を出し直す
+        elif was_started and not prev_started:
+            self.paintCleared.emit()  # 最初の一筆の取り消し。「確定」を引っ込める
+        self.maskHistoryChanged.emit()
 
     # --- パス(頂点クリック)ツール ------------------------------------------
     def has_path(self) -> bool:
@@ -837,6 +940,21 @@ class ImageView(QGraphicsView):
             return False
 
         poly = QPolygonF(pts)
+        # 焼く前に、焼かれる範囲の直前画素を履歴へ積む(Ctrl+Z で戻せるように)。
+        # _min_paint_radius / _paint_started はこの下で変わるので先に控える。
+        hist_rect = (
+            poly.boundingRect()
+            .adjusted(-2.0, -2.0, 2.0, 2.0)
+            .toAlignedRect()
+            .intersected(self._mask_image.rect())
+        )
+        if not hist_rect.isEmpty():
+            self._push_history(
+                hist_rect,
+                self._mask_image.copy(hist_rect),
+                self._paint_started,
+                self._min_paint_radius,
+            )
         # 設定は _prefill_mask / _paint_to と揃える。アンチエイリアスを切るのは、
         # 縁のにじみがマスクを削って穴を作るのを防ぐため。
         painter = QPainter(self._mask_image)
@@ -987,8 +1105,11 @@ class ImageView(QGraphicsView):
         painter.end()
 
         self._last_paint_pt = scene_pt
+        dirty = self._dirty_rect(last, scene_pt, r)
+        if self._stroke_backup is not None:
+            self._stroke_rect = self._stroke_rect.united(dirty)
         if self._paint_item is not None:
-            self._paint_item.update(self._dirty_rect(last, scene_pt, r))
+            self._paint_item.update(dirty)
 
     @staticmethod
     def _dirty_rect(last: QPointF | None, cur: QPointF, r: float) -> QRectF:
@@ -1106,6 +1227,8 @@ class ImageView(QGraphicsView):
         if self._add_mode and event.button() == Qt.LeftButton:
             # 追加モード: 左ドラッグで塗る(選択・矩形処理は行わない)
             self._painting = True
+            # 塗る前・_paint_started が立つ前の状態を控える(順序が重要)
+            self._begin_stroke()
             self._paint_to(self.mapToScene(event.pos()))
             # 「確定」を出すのは塗った後だけ。消しゴムだけ動かしても確定は出さない。
             if self._tool is Tool.BRUSH and not self._paint_started:
@@ -1163,6 +1286,7 @@ class ImageView(QGraphicsView):
             # 一筆の終わり。塗った内容は保持し、次の筆も同じ領域へ足せる。
             self._painting = False
             self._last_paint_pt = None
+            self._end_stroke()
             # 消し切ったなら「塗り始め前」の状態へ戻す(確定を引っ込めるため)。
             # 全面走査するので、消しゴムを離した瞬間だけに限る。
             if (

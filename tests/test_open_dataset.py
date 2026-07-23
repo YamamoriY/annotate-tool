@@ -72,7 +72,7 @@ def test_empty_dataset_has_nothing_and_saves_nowhere(tmp_path):
 def test_window_starts_without_a_dataset(app, ini):
     w = main_window.ViewerWindow()
     try:
-        assert w._path_label.text() == "未選択"
+        assert w._path_label.full_text() == "未選択"
         # 塗る先の画像が無いので「追加」は出さない
         assert not w._actions["add"].isEnabled()
     finally:
@@ -86,12 +86,32 @@ def test_open_dataset_swaps_the_view_and_remembers_the_path(app, ini, tmp_path):
     try:
         assert w.open_dataset(path)
         assert w.state.dataset.json_path == path
-        assert str(path) in w._path_label.text()
-        assert "a.png" in w._info_label.text()
+        assert w._path_label.full_text() == str(path)
+        assert w._info_label.name_label.full_text() == "a.png"
         assert w._actions["add"].isEnabled()
         # 次の起動で開き直せるよう、切り替えた時点で書き出す
         settings_module.flush(w.settings)
         assert settings_module.last_json(settings_module.load()) == str(path)
+    finally:
+        w.close()
+
+
+def test_long_path_does_not_widen_the_panel(app, ini, tmp_path):
+    """空白を含まない長いパスは折り返し不能な1単語になる。
+
+    折り返し表示だった頃は QLabel の minimumSizeHint がパス全文の幅になり、
+    右ドックの最小幅ごと押し上げていた(パネルが縮められなくなる不具合)。
+    省略表示では全文はツールチップへ逃がし、幅は要求しない。
+    """
+    deep = tmp_path / ("a_very_long_directory_name" * 3) / "nested"
+    path = make_dataset(deep)
+    w = main_window.ViewerWindow()
+    try:
+        w.open_dataset(path)
+        assert w._path_label.full_text() == str(path)
+        assert w._path_label.toolTip() == str(path)
+        # 律速は他のウィジェット(ボタン行など)であって、パス全文の幅ではない
+        assert w.side_panel.widget().minimumSizeHint().width() < 400
     finally:
         w.close()
 
@@ -124,7 +144,7 @@ def test_open_dataset_resets_selection_and_index(app, ini, tmp_path):
         w.open_dataset(second)
         assert w.state.selected_indices == (), "別データの選択を持ち越さない"
         assert w.state.image_index == 0
-        assert "b.png" in w._info_label.text()
+        assert w._info_label.name_label.full_text() == "b.png"
     finally:
         w.close()
 

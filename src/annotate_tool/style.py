@@ -131,20 +131,36 @@ QLabel {
 }
 """
 
-# 「画像」グループの中に出す、いま見ている画像の情報。枠は所属するグループが
-# 持つので、ここでは付けない(入れ子の箱になる)。
-INFO_LABEL_QSS = """
+# 「画像」グループ1行目のファイル名(主役なので太字)。省略表示ラベルに当てる
+# ため padding は付けない(QSS の padding は省略幅の計算に乗らず、端が欠ける)。
+# 枠は所属するグループが持つので、ここでは付けない(入れ子の箱になる)。
+INFO_NAME_QSS = """
 QLabel {
     color: rgba(255, 255, 255, 230);
     font-size: 14px;
-    padding: 0 4px;
+    font-weight: bold;
+    background: transparent;
+    border: none;
+}
+"""
+# 1行目の枚数表示 [n/N]。ファイル名と同格の見た目から太字だけ外す。
+INFO_POS_QSS = """
+QLabel {
+    color: rgba(255, 255, 255, 230);
+    font-size: 14px;
     background: transparent;
     border: none;
 }
 """
 # 2行目(インスタンス数)。1行目より淡く小さくして、主役をファイル名にする。
-# QSS はラベル全体にしか効かないため、行ごとの差はこの HTML で付ける。
-INFO_SUB_HTML = 'color: rgba(255, 255, 255, 150); font-size: 12px;'
+INFO_SUB_QSS = """
+QLabel {
+    color: rgba(255, 255, 255, 150);
+    font-size: 12px;
+    background: transparent;
+    border: none;
+}
+"""
 
 # 操作説明などの補助テキスト(見出しより淡く、少し小さめ)。
 CONTROL_HELP_QSS = """
@@ -152,6 +168,17 @@ QLabel {
     color: rgba(255, 255, 255, 150);
     font-size: 12px;
     padding: 0 4px;
+    background: transparent;
+    border: none;
+}
+"""
+
+# パス表示。補助テキストと同じ見た目だが、省略表示ラベルに当てるため padding
+# を付けない(QSS の padding は省略幅の計算に乗らず、端が欠ける)。
+PATH_LABEL_QSS = """
+QLabel {
+    color: rgba(255, 255, 255, 150);
+    font-size: 12px;
     background: transparent;
     border: none;
 }

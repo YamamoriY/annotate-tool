@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QPoint, QPointF
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
@@ -254,30 +254,33 @@ def test_image_group_holds_the_navigation_buttons(window):
 
 
 def test_info_label_style(window):
-    assert window._info_label.styleSheet() == style.INFO_LABEL_QSS
-    assert window._info_label.wordWrap(), "パネル幅では収まらないため折り返す"
+    assert window._info_label.name_label.styleSheet() == style.INFO_NAME_QSS
+    assert window._info_label.pos_label.styleSheet() == style.INFO_POS_QSS
+    assert window._info_label.sub_label.styleSheet() == style.INFO_SUB_QSS
 
 
 def test_info_label_splits_file_and_contents(window):
-    """1行目にどの画像か(ファイル名は太字)、2行目にその中身。"""
-    text = window._info_label.text()
-    assert "<b>a.png</b> [1/2]" in text
-    assert "インスタンス数: 2" in text
-    assert text.index("a.png") < text.index("インスタンス数")
+    """1行目にどの画像か、2行目にその中身。"""
+    info = window._info_label
+    assert info.name_label.full_text() == "a.png"
+    assert info.pos_label.text() == "[1/2]"
+    assert info.sub_label.text() == "インスタンス数: 2"
 
 
 def test_info_label_follows_the_current_image(window):
     window.state.next_image()
-    assert "<b>b.png</b> [2/2]" in window._info_label.text()
+    assert window._info_label.name_label.full_text() == "b.png"
+    assert window._info_label.pos_label.text() == "[2/2]"
 
 
-def test_info_label_escapes_the_file_name(app, image_file):
-    """ファイル名は任意の文字列。素で流すと HTML として解釈されてしまう。"""
+def test_info_label_shows_html_ish_file_names_as_is(app, image_file):
+    """ファイル名は任意の文字列。HTML として解釈させず平文のまま出す。"""
     dataset = StubDataset(image_file)
     dataset.images = [ImageEntry(1, "a<b>&.png", 10, 10)]
     w = ViewerWindow(dataset)
     try:
-        assert "a&lt;b&gt;&amp;.png" in w._info_label.text()
+        assert w._info_label.name_label.full_text() == "a<b>&.png"
+        assert w._info_label.name_label.textFormat() == Qt.PlainText
     finally:
         w.close()
 

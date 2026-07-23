@@ -711,7 +711,12 @@ class ImageView(QGraphicsView):
         painter = QPainter(self._mask_image)
         painter.setRenderHint(QPainter.Antialiasing, False)
         painter.setCompositionMode(QPainter.CompositionMode_Source)
-        painter.setPen(Qt.NoPen)
+        # 塗りだけでなく幅1のペンで輪郭も焼く。保存時の findContours は境界
+        # ピクセルの中心を通る輪郭を返すため、塗りのみだと辺上のピクセルが
+        # 落ちて、編集→保存のたびに右端・下端が1pxずつ痩せていく。
+        pen = QPen(style.PAINT_COLOR)
+        pen.setWidth(1)
+        painter.setPen(pen)
         painter.setBrush(QBrush(style.PAINT_COLOR))
         for pts in ann.polygons():
             painter.drawPolygon(QPolygonF([QPointF(x, y) for x, y in pts]))

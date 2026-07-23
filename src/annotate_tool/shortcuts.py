@@ -57,6 +57,10 @@ DELETE = Shortcut("delete", "削除", ("Delete",))
 TOOL_BRUSH = Shortcut("tool_brush", "ブラシ", ("1",))
 TOOL_ERASER = Shortcut("tool_eraser", "消しゴム", ("2",))
 TOOL_POLYGON = Shortcut("tool_polygon", "パス", ("3",))
+# 選択中のブラシ / 消しゴムだけを調整する。画像編集ソフトで一般的な角括弧に
+# 揃え、左を細く・右を太くとする。増減幅は style 側で決める。
+BRUSH_SMALLER = Shortcut("brush_smaller", "筆を細く", ("[",))
+BRUSH_LARGER = Shortcut("brush_larger", "筆を太く", ("]",))
 
 ALL: tuple[Shortcut, ...] = (
     PREV,
@@ -74,6 +78,8 @@ ALL: tuple[Shortcut, ...] = (
     TOOL_BRUSH,
     TOOL_ERASER,
     TOOL_POLYGON,
+    BRUSH_SMALLER,
+    BRUSH_LARGER,
 )
 
 BY_ID: dict[str, Shortcut] = {s.id: s for s in ALL}

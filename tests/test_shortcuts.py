@@ -39,6 +39,12 @@ def test_add_and_confirm_keys():
     assert "Return" in keymap.keys(shortcuts.CONFIRM)
 
 
+def test_brush_size_keys():
+    keymap = shortcuts.defaults()
+    assert keymap.hint(shortcuts.BRUSH_SMALLER) == "["
+    assert keymap.hint(shortcuts.BRUSH_LARGER) == "]"
+
+
 # --- キー表記の正規化 -----------------------------------------------------
 def test_normalize_absorbs_notation_differences():
     assert shortcuts.normalize("ctrl+z") == "Ctrl+Z"

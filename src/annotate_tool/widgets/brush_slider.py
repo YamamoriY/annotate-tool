@@ -18,7 +18,13 @@ class BrushSlider(QWidget):
 
     radiusChanged = Signal(float)
 
-    def __init__(self, value: float = style.BRUSH_RADIUS, parent=None):
+    def __init__(
+        self,
+        value: float = style.BRUSH_RADIUS,
+        smaller_hint: str = "[",
+        larger_hint: str = "]",
+        parent=None,
+    ):
         super().__init__(parent)
         self.setStyleSheet(style.BRUSH_SLIDER_QSS)
         # 追加モード中はビューがブラシ円カーソルを持つ。子ウィジェットはそれを
@@ -46,8 +52,17 @@ class BrushSlider(QWidget):
         )
         self._value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
+        # キーは設定で差し替えられるため、固定文字列ではなく Keymap 由来の表示を
+        # ToolPanel から受け取る。方向の説明は常時出すと横長になるので tooltip へ。
+        self._shortcut_label = QLabel(f"{smaller_hint} / {larger_hint}", self)
+        self._shortcut_label.setStyleSheet(style.BRUSH_SHORTCUT_HINT_QSS)
+        self._shortcut_label.setToolTip(
+            f"{smaller_hint}：細くする\n{larger_hint}：太くする"
+        )
+
         layout.addWidget(self._slider)
         layout.addWidget(self._value_label)
+        layout.addWidget(self._shortcut_label)
 
     # --- 値 -----------------------------------------------------------------
     def radius(self) -> float:

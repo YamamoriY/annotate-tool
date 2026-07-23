@@ -145,6 +145,14 @@ class ViewerWindow(QMainWindow):
         for shortcut, tool in self._TOOL_SHORTCUTS:
             # triggered は checked を渡してくるので受け流す
             make(shortcut, lambda _checked=False, t=tool: self._select_tool(t))
+        make(
+            shortcuts.BRUSH_SMALLER,
+            lambda: self._adjust_brush_radius(-style.BRUSH_RADIUS_STEP),
+        )
+        make(
+            shortcuts.BRUSH_LARGER,
+            lambda: self._adjust_brush_radius(style.BRUSH_RADIUS_STEP),
+        )
 
         # 「その操作がいま可能か」の唯一の出どころ。
         # キー(QAction の有効/無効)もボタンの表示もここだけを見る。以前は同じ条件を
@@ -176,6 +184,10 @@ class ViewerWindow(QMainWindow):
         # ツールの持ち替えは、ツールパネルが出ている追加モード中だけ
         for shortcut, _tool in self._TOOL_SHORTCUTS:
             self._enabled[shortcut.id] = lambda: self.state.add_mode
+        for shortcut in (shortcuts.BRUSH_SMALLER, shortcuts.BRUSH_LARGER):
+            self._enabled[shortcut.id] = lambda: (
+                self.state.add_mode and self.tool_panel.tool() is not Tool.POLYGON
+            )
 
     def _can(self, shortcut: shortcuts.Shortcut) -> bool:
         """その操作がいま可能か。判断は `_enabled` の1箇所だけが持つ。"""
@@ -381,7 +393,7 @@ class ViewerWindow(QMainWindow):
         self.action_bar.deleteClicked.connect(self._delete_selected)
         self.add_bar.addClicked.connect(self.state.enter_add_mode)
         self.add_bar.cancelClicked.connect(self.state.cancel_add_mode)
-        self.tool_panel.toolChanged.connect(self.view.set_tool)
+        self.tool_panel.toolChanged.connect(self._on_tool_changed)
         self.tool_panel.radiusChanged.connect(self.view.set_radius)
         self.add_bar.confirmClicked.connect(self._confirm_add)
         # 面積スライダーは「もう一つの選択ソース」。つまみを動かさず触っただけでも
@@ -518,6 +530,18 @@ class ViewerWindow(QMainWindow):
             return
         self.tool_panel.set_tool(tool)
         self.view.set_tool(tool)
+        self._update_actions()
+
+    def _on_tool_changed(self, tool: Tool) -> None:
+        """パネルでの持ち替えをビューとショートカットの可否へ反映する。"""
+        self.view.set_tool(tool)
+        self._update_actions()
+
+    def _adjust_brush_radius(self, delta: float) -> None:
+        """選択中のブラシ / 消しゴムを細く、または太くする。"""
+        shortcut = shortcuts.BRUSH_SMALLER if delta < 0 else shortcuts.BRUSH_LARGER
+        if self._can(shortcut):
+            self.tool_panel.adjust_current_radius(delta)
 
     def _on_add_shortcut(self) -> None:
         if self._can(shortcuts.ADD):

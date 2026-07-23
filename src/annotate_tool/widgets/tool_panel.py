@@ -61,7 +61,12 @@ class ToolPanel(QWidget):
             self._buttons[tool] = button
             if radius is None:
                 continue
-            slider = BrushSlider(radius, self)
+            slider = BrushSlider(
+                radius,
+                keymap.hint(shortcuts.BRUSH_SMALLER),
+                keymap.hint(shortcuts.BRUSH_LARGER),
+                self,
+            )
             slider.radiusChanged.connect(
                 lambda r, t=tool: self.radiusChanged.emit(t, r)
             )
@@ -101,6 +106,13 @@ class ToolPanel(QWidget):
     def set_tool(self, tool: Tool) -> None:
         """外部からツールを切り替える(シグナルは出さない)。"""
         self._buttons[tool].setChecked(True)
+
+    def adjust_current_radius(self, delta: float) -> None:
+        """選択中のブラシ / 消しゴムの太さを変える。パスでは何もしない。"""
+        slider = self._sliders.get(self.tool())
+        if slider is not None:
+            # BrushSlider が範囲への丸めと radiusChanged の通知を受け持つ。
+            slider.set_radius(slider.radius() + delta)
 
     # --- 表示制御 -----------------------------------------------------------
     def set_active(self, active: bool) -> None:

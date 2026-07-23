@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 from annotate_tool import shortcuts, style
 from annotate_tool.coco_data import Annotation, ImageEntry
+from annotate_tool.tools import Tool
 from annotate_tool.widgets.control_group import ControlGroup
 from annotate_tool.widgets.main_window import ViewerWindow
 
@@ -156,6 +157,59 @@ def test_tool_shortcut_updates_panel_and_view(window):
         window._select_tool(tool)
         assert window.tool_panel.tool() is tool, shortcut.id
         assert window.view._tool is tool, shortcut.id
+
+
+def test_brush_size_shortcuts_only_work_for_radius_tools(window):
+    size_shortcuts = (shortcuts.BRUSH_SMALLER, shortcuts.BRUSH_LARGER)
+    assert all(not enabled(window, shortcut) for shortcut in size_shortcuts)
+
+    window.state.enter_add_mode()
+    assert all(enabled(window, shortcut) for shortcut in size_shortcuts)
+
+    window._select_tool(Tool.POLYGON)
+    assert all(not enabled(window, shortcut) for shortcut in size_shortcuts)
+
+    window._select_tool(Tool.ERASER)
+    assert all(enabled(window, shortcut) for shortcut in size_shortcuts)
+
+
+def test_brush_size_shortcuts_adjust_only_the_selected_tool(window):
+    window.state.enter_add_mode()
+    brush_before = window.tool_panel.radius(Tool.BRUSH)
+    eraser_before = window.tool_panel.radius(Tool.ERASER)
+
+    window._select_tool(Tool.BRUSH)
+    window._actions[shortcuts.BRUSH_LARGER.id].trigger()
+    assert window.tool_panel.radius(Tool.BRUSH) == brush_before + style.BRUSH_RADIUS_STEP
+    assert window.view._radii[Tool.BRUSH] == brush_before + style.BRUSH_RADIUS_STEP
+    assert window.tool_panel.radius(Tool.ERASER) == eraser_before
+
+    window._select_tool(Tool.ERASER)
+    window._actions[shortcuts.BRUSH_SMALLER.id].trigger()
+    assert window.tool_panel.radius(Tool.ERASER) == eraser_before - style.BRUSH_RADIUS_STEP
+    assert window.view._radii[Tool.ERASER] == eraser_before - style.BRUSH_RADIUS_STEP
+    assert window.tool_panel.radius(Tool.BRUSH) == brush_before + style.BRUSH_RADIUS_STEP
+
+
+def test_brush_size_shortcuts_stop_at_slider_limits(window):
+    window.state.enter_add_mode()
+    window._select_tool(Tool.BRUSH)
+    slider = window.tool_panel._sliders[Tool.BRUSH]
+
+    slider.set_radius(style.BRUSH_RADIUS_MIN)
+    window._adjust_brush_radius(-1.0)
+    assert slider.radius() == style.BRUSH_RADIUS_MIN
+
+    slider.set_radius(style.BRUSH_RADIUS_MAX)
+    window._adjust_brush_radius(1.0)
+    assert slider.radius() == style.BRUSH_RADIUS_MAX
+
+
+def test_brush_size_hint_is_shown_beside_each_slider(window):
+    for slider in window.tool_panel._sliders.values():
+        assert slider._shortcut_label.text() == "[ / ]"
+        assert "細く" in slider._shortcut_label.toolTip()
+        assert "太く" in slider._shortcut_label.toolTip()
 
 
 def test_entry_tool_is_carried_over(window):

@@ -217,7 +217,11 @@ class ImageView(QGraphicsView):
         # マスク(_mask_image)へ焼き込む。塗るコストは筆の周辺だけに収まり、塗った
         # 時間・回数に依存しない(確定時のポリゴン化は mask_polygon が一度だけ行う)。
         self._add_mode = False
-        self._painting = False  # 左ボタンで塗っている最中か
+        self._painting = False  # ドラッグで塗っている最中か
+        self._paint_button: Qt.MouseButton | None = None  # 塗りを始めたボタン
+        # この一筆で実際に使うツール。右ボタンで始めた一筆の間だけ、選択中の
+        # ツールと入れ替わる(_active_tool が参照する)。
+        self._stroke_tool: Tool | None = None
         self._paint_started = False  # このモードで一度でも塗ったか
         self._mask_image: QImage | None = None  # 塗りマスク(ARGB32・画像と同サイズ)
         self._paint_item: _MaskItem | None = None  # マスクを表示するアイテム
@@ -232,6 +236,9 @@ class ImageView(QGraphicsView):
             Tool.BRUSH: style.BRUSH_RADIUS,
             Tool.ERASER: style.ERASER_RADIUS,
         }
+        # 右ドラッグで反対のツール(ブラシ⇔消しゴム)を使う設定。キーは
+        # 「選択中のツール」で、そのツールのときに右が反対側として働く。
+        self._right_click_swap = {Tool.BRUSH: False, Tool.ERASER: False}
         self._min_paint_radius = style.BRUSH_RADIUS_MAX  # この回で使った最も細い筆
 
         # 一筆単位の取り消し履歴。各エントリは「その一筆が触れた矩形」と、
@@ -672,6 +679,8 @@ class ImageView(QGraphicsView):
         self._restore_hidden()
         self._add_mode = active
         self._painting = False
+        self._paint_button = None
+        self._stroke_tool = None
         self._paint_started = False
         self._last_paint_pt = None
         self._set_blink_paused(active)
@@ -766,13 +775,40 @@ class ImageView(QGraphicsView):
         if radius == self._radii[tool]:
             return
         self._radii[tool] = radius
-        if self._add_mode and tool is self._tool:
+        if self._add_mode and tool is self._active_tool:
             self._apply_cursor()
+
+    def set_right_click_swap(self, tool: Tool, enabled: bool) -> None:
+        """tool の選択中に、右ドラッグで反対のツールを使うかを切り替える。
+
+        ブラシなら右で消しゴム、消しゴムなら右でブラシ。方向ごとに独立。
+        """
+        if tool in self._right_click_swap:
+            self._right_click_swap[tool] = enabled
+
+    @property
+    def _active_tool(self) -> Tool:
+        """いま塗りに使うツール。右ボタンの一筆の間だけ選択中と入れ替わる。"""
+        return self._stroke_tool if self._stroke_tool is not None else self._tool
+
+    def _stroke_tool_for(self, button: Qt.MouseButton) -> Tool | None:
+        """このボタンで一筆を始めるならそのツール、始めないなら None。
+
+        左は選択中のツールそのまま。右は設定が有効なときだけ反対のツール
+        (ブラシ⇔消しゴム)。パスはドラッグで塗らないので対象外。
+        """
+        if self._is_path_tool:
+            return None
+        if button == Qt.LeftButton:
+            return self._tool
+        if button == Qt.RightButton and self._right_click_swap.get(self._tool):
+            return Tool.ERASER if self._tool is Tool.BRUSH else Tool.BRUSH
+        return None
 
     @property
     def _brush_radius(self) -> float:
-        """現在選択中のツールの半径(半径を持たないツールでは既定値)。"""
-        return self._radii.get(self._tool, style.BRUSH_RADIUS)
+        """いま塗りに使うツールの半径(半径を持たないツールでは既定値)。"""
+        return self._radii.get(self._active_tool, style.BRUSH_RADIUS)
 
     @property
     def _is_path_tool(self) -> bool:
@@ -1083,7 +1119,7 @@ class ImageView(QGraphicsView):
         if self._mask_image is None:
             return
         r = self._brush_radius
-        if self._tool is Tool.BRUSH:
+        if self._active_tool is Tool.BRUSH:
             # スリバー判定の基準は「この回で使った最も細い筆」。太い筆に持ち替えた
             # 後でも細筆で打った点が捨てられないようにする(消しゴムは対象外)。
             self._min_paint_radius = min(self._min_paint_radius, r)
@@ -1093,7 +1129,7 @@ class ImageView(QGraphicsView):
         painter.setRenderHint(QPainter.Antialiasing, False)
         painter.setCompositionMode(
             QPainter.CompositionMode_Clear
-            if self._tool is Tool.ERASER
+            if self._active_tool is Tool.ERASER
             else QPainter.CompositionMode_Source
         )
         if last is None:
@@ -1223,20 +1259,30 @@ class ImageView(QGraphicsView):
             self._start_pan(event)
             event.accept()
             return
+        if self._add_mode and self._painting:
+            # 一筆の最中に別のボタンが押されても無視する(途中でツールが
+            # 入れ替わったり、選択処理へ落ちたりしないように)。
+            event.accept()
+            return
         if self._add_mode and self._is_path_tool and event.button() == Qt.LeftButton:
             # 押した瞬間の位置で頂点を確定する。release まで待つとドラッグ判定に
             # 引っかかり、マウスを動かしながらのクリックで頂点が打てなくなる。
             self._add_path_point(event.pos())
             event.accept()
             return
-        if self._add_mode and event.button() == Qt.LeftButton:
-            # 追加モード: 左ドラッグで塗る(選択・矩形処理は行わない)
+        stroke_tool = self._stroke_tool_for(event.button()) if self._add_mode else None
+        if stroke_tool is not None:
+            # 追加モード: ドラッグで塗る(選択・矩形処理は行わない)。右ボタンは
+            # 設定が有効なら反対のツール(ブラシ⇔消しゴム)として働く。
             self._painting = True
+            self._paint_button = event.button()
+            self._stroke_tool = stroke_tool
+            self._apply_cursor()  # 入れ替えたツールの太さの円にする
             # 塗る前・_paint_started が立つ前の状態を控える(順序が重要)
             self._begin_stroke()
             self._paint_to(self.mapToScene(event.pos()))
             # 「確定」を出すのは塗った後だけ。消しゴムだけ動かしても確定は出さない。
-            if self._tool is Tool.BRUSH and not self._paint_started:
+            if stroke_tool is Tool.BRUSH and not self._paint_started:
                 self._paint_started = True
                 self.paintStarted.emit()
             event.accept()
@@ -1287,15 +1333,19 @@ class ImageView(QGraphicsView):
             event.accept()
             return
 
-        if self._add_mode and event.button() == Qt.LeftButton:
+        if self._add_mode and self._painting and event.button() == self._paint_button:
             # 一筆の終わり。塗った内容は保持し、次の筆も同じ領域へ足せる。
+            stroke_tool = self._active_tool
             self._painting = False
+            self._paint_button = None
+            self._stroke_tool = None
             self._last_paint_pt = None
             self._end_stroke()
+            self._apply_cursor()  # 右ボタンで入れ替えていたツールの円を元へ戻す
             # 消し切ったなら「塗り始め前」の状態へ戻す(確定を引っ込めるため)。
             # 全面走査するので、消しゴムを離した瞬間だけに限る。
             if (
-                self._tool is Tool.ERASER
+                stroke_tool is Tool.ERASER
                 and self._paint_started
                 and self._mask_is_empty()
             ):

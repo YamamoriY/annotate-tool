@@ -31,6 +31,7 @@ from annotate_tool.state import ViewerState
 from annotate_tool.tools import Tool
 from annotate_tool.widgets.action_bar import FloatingActionBar
 from annotate_tool.widgets.add_bar import AddBar
+from annotate_tool.widgets.advanced_settings_dialog import AdvancedSettingsDialog
 from annotate_tool.widgets.control_group import ControlGroup
 from annotate_tool.widgets.image_view import ImageView
 from annotate_tool.widgets.instance_panel import InstancePanel
@@ -70,6 +71,12 @@ class ViewerWindow(QMainWindow):
 
         self.view = ImageView(self)
         self.view.set_touchpad_mode(settings.touchpad_mode(self.settings))
+        self.view.set_right_click_swap(
+            Tool.BRUSH, settings.brush_right_click_eraser(self.settings)
+        )
+        self.view.set_right_click_swap(
+            Tool.ERASER, settings.eraser_right_click_brush(self.settings)
+        )
         self.setCentralWidget(self.view)
         self.action_bar = FloatingActionBar(self.view, self.keymap)
         self.add_bar = AddBar(self.view, self.keymap)
@@ -285,9 +292,42 @@ class ViewerWindow(QMainWindow):
         )
         # ↗ は「別の場所(エクスプローラー)が開く」ことを示す慣用のしるし
         setting_group.add_button("キーボードショートカット ↗", self._open_settings_folder)
+        # ... は「ダイアログが開く」ことを示す慣用のしるし(↗ とは開く先が違う)
+        setting_group.add_button("上級者設定...", self._open_advanced_settings)
         self.side_panel.add_widget_bottom(setting_group)
 
         self._update_guide_texts()
+
+    def _open_advanced_settings(self) -> None:
+        """上級者設定を別ウィンドウで開く。
+
+        チェックの変更は閉じるのを待たずその場で書き出してビューへ反映する
+        (切り替えた時点で書き出すのは他の設定と同じ。強制終了で失わない)。
+        """
+        dialog = AdvancedSettingsDialog(self)
+        brush_box = dialog.add_checkbox(
+            "ブラシの使用中、右クリックで消しゴムを使う",
+            checked=settings.brush_right_click_eraser(self.settings),
+        )
+        brush_box.toggled.connect(
+            lambda checked: self._on_right_click_swap_toggled(Tool.BRUSH, checked)
+        )
+        eraser_box = dialog.add_checkbox(
+            "消しゴムの使用中、右クリックでブラシを使う",
+            checked=settings.eraser_right_click_brush(self.settings),
+        )
+        eraser_box.toggled.connect(
+            lambda checked: self._on_right_click_swap_toggled(Tool.ERASER, checked)
+        )
+        dialog.exec()
+
+    def _on_right_click_swap_toggled(self, tool: Tool, checked: bool) -> None:
+        """右クリックでツールを入れ替える設定の切替。書き出してビューへ反映。"""
+        if tool is Tool.BRUSH:
+            settings.set_brush_right_click_eraser(self.settings, checked)
+        else:
+            settings.set_eraser_right_click_brush(self.settings, checked)
+        self.view.set_right_click_swap(tool, checked)
 
     def _on_touchpad_mode_toggled(self, checked: bool) -> None:
         """タッチパッドモードの切替。ビューへ反映し、その場で書き出す。"""

@@ -171,6 +171,21 @@ QCheckBox:hover { color: rgba(255, 255, 255, 220); }
 # ::indicator は素のままにする。background-color を当てるとネイティブ描画が
 # 止まり、チェック時の ✓ が消えて「色が変わるだけの四角」になるため。
 
+# 上級者設定ダイアログ。既定のダイアログは OS のライトテーマで描かれ、ダーク
+# トーンの本体から浮いてしまうため、背景と文字をメイン画面に揃える。チェックは
+# サイドパネル(CONTROL_CHECK_QSS)より一回り大きくし、単独ウィンドウでも読み
+# やすくする。::indicator に手を入れない理由は CONTROL_CHECK_QSS と同じ。
+ADVANCED_DIALOG_QSS = """
+QDialog { background-color: rgb(30, 30, 30); }
+QCheckBox {
+    color: rgba(255, 255, 255, 200);
+    font-size: 13px;
+    background: transparent;
+    border: none;
+}
+QCheckBox:hover { color: white; }
+"""
+
 # カテゴリでまとめる浮動バーの外枠(枠線 + 半透明背景)。
 CONTROL_GROUP_QSS = """
 #controlGroup {

@@ -28,6 +28,14 @@ DEFAULT_CONFIRM_DELETE = True
 KEY_TOUCHPAD_MODE = "ui/touchpad_mode"
 DEFAULT_TOUCHPAD_MODE = False
 
+# 右クリックで反対のツール(ブラシ⇔消しゴム)を使う(上級者設定)。押している
+# あいだだけ入れ替わり、離すと元のツールへ戻る。方向ごとに独立した ON/OFF。
+# 誤クリックが誤消去・誤塗りになり得るので、既定はどちらも OFF。
+KEY_BRUSH_RIGHT_CLICK_ERASER = "ui/brush_right_click_eraser"
+DEFAULT_BRUSH_RIGHT_CLICK_ERASER = False
+KEY_ERASER_RIGHT_CLICK_BRUSH = "ui/eraser_right_click_brush"
+DEFAULT_ERASER_RIGHT_CLICK_BRUSH = False
+
 # 最後に開いた COCO JSON。次の起動でこれを開き直す(引数なしで起動できるように)。
 KEY_LAST_JSON = "io/last_json"
 
@@ -115,6 +123,28 @@ def touchpad_mode(settings: QSettings) -> bool:
 
 def set_touchpad_mode(settings: QSettings, value: bool) -> None:
     settings.setValue(KEY_TOUCHPAD_MODE, value)
+
+
+def brush_right_click_eraser(settings: QSettings) -> bool:
+    # Windows では bool が文字列で返ることがあるため type= を必ず付ける
+    return settings.value(
+        KEY_BRUSH_RIGHT_CLICK_ERASER, DEFAULT_BRUSH_RIGHT_CLICK_ERASER, type=bool
+    )
+
+
+def set_brush_right_click_eraser(settings: QSettings, value: bool) -> None:
+    settings.setValue(KEY_BRUSH_RIGHT_CLICK_ERASER, value)
+
+
+def eraser_right_click_brush(settings: QSettings) -> bool:
+    # Windows では bool が文字列で返ることがあるため type= を必ず付ける
+    return settings.value(
+        KEY_ERASER_RIGHT_CLICK_BRUSH, DEFAULT_ERASER_RIGHT_CLICK_BRUSH, type=bool
+    )
+
+
+def set_eraser_right_click_brush(settings: QSettings, value: bool) -> None:
+    settings.setValue(KEY_ERASER_RIGHT_CLICK_BRUSH, value)
 
 
 def last_json(settings: QSettings) -> str:

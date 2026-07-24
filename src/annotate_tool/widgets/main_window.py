@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-from html import escape
 from pathlib import Path
 
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence, QPixmap
@@ -33,6 +32,8 @@ from annotate_tool.widgets.action_bar import FloatingActionBar
 from annotate_tool.widgets.add_bar import AddBar
 from annotate_tool.widgets.advanced_settings_dialog import AdvancedSettingsDialog
 from annotate_tool.widgets.control_group import ControlGroup
+from annotate_tool.widgets.elided_label import ElidedLabel
+from annotate_tool.widgets.image_info_label import ImageInfoLabel
 from annotate_tool.widgets.image_view import ImageView
 from annotate_tool.widgets.instance_panel import InstancePanel
 from annotate_tool.widgets.side_panel import SidePanel
@@ -220,19 +221,17 @@ class ViewerWindow(QMainWindow):
         # 何の意味も持たないので、画像より上に置く。
         file_group = ControlGroup("ファイル")
         file_group.add_button("COCO JSON を開く…", self._open_dataset_dialog)
-        self._path_label = QLabel()
-        self._path_label.setStyleSheet(style.CONTROL_HELP_QSS)
-        self._path_label.setWordWrap(True)  # パネル幅に収まらないため折り返す
-        # 表示専用。ただし選択はできるようにする(パスを他所へ貼れると助かる)。
-        self._path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        # パスは空白を含まず折り返せない1単語になるため、折り返しではなく
+        # 省略表示にする(折り返しだとパネルの最小幅がパス全文の幅まで膨らむ)。
+        # 全文はツールチップで見せる。
+        self._path_label = ElidedLabel()
+        self._path_label.setStyleSheet(style.PATH_LABEL_QSS)
         file_group.add_widget(self._path_label)
         self.side_panel.add_widget(file_group)
 
         # 次は「いまどの画像か」と、その送り。見る対象と移動手段をまとめる。
         image_group = ControlGroup("画像")
-        self._info_label = QLabel()
-        self._info_label.setStyleSheet(style.INFO_LABEL_QSS)
-        self._info_label.setWordWrap(True)  # パネル幅では収まらないため折り返す
+        self._info_label = ImageInfoLabel()
         image_group.add_widget(self._info_label)
         image_group.add_row(
             [
@@ -402,7 +401,10 @@ class ViewerWindow(QMainWindow):
 
     def _update_path_label(self) -> None:
         path = self.state.dataset.json_path
-        self._path_label.setText(escape(str(path)) if path else "未選択")
+        if path:
+            self._path_label.set_full_text(str(path))
+        else:
+            self._path_label.set_full_text("未選択", tooltip="")
 
     def _open_settings_folder(self) -> None:
         """設定ファイルの置き場をエクスプローラーで開く。
@@ -491,17 +493,15 @@ class ViewerWindow(QMainWindow):
 
         if image is not None:
             # 横長のステータスバーではなく縦長のパネルに出すため、行で分ける
-            # (1行目=どの画像か、2行目=その中身)。行ごとに見た目を変えるので
-            # HTML で組む。ファイル名は任意の文字列なのでエスケープする。
-            self._info_label.setText(
-                f"<b>{escape(image.file_name)}</b> "
-                f"[{self.state.image_index + 1}/{len(dataset.images)}]"
-                f"<br><span style='{style.INFO_SUB_HTML}'>"
-                f"インスタンス数: {len(annotations)}</span>"
+            # (1行目=どの画像か、2行目=その中身)。
+            self._info_label.set_info(
+                image.file_name,
+                f"[{self.state.image_index + 1}/{len(dataset.images)}]",
+                f"インスタンス数: {len(annotations)}",
             )
         else:
             # 前のデータの画像名が残ると、何を見ているのか分からなくなる
-            self._info_label.setText("画像がありません")
+            self._info_label.set_message("画像がありません")
 
     def _apply_selection(self, indices) -> None:
         self.view.set_selection(indices)

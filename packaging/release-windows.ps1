@@ -35,8 +35,16 @@ foreach ($asset in $assets) {
 
 # The other OS may already have created this version's release. In that case,
 # add/replace only the Windows assets instead of trying to create it again.
-& gh release view $tag *> $null
-$releaseExists = $LASTEXITCODE -eq 0
+$previousErrorActionPreference = $ErrorActionPreference
+try {
+    # Windows PowerShell 5.1 turns a native command's stderr into an error record.
+    # A missing release is an expected result here, so inspect the exit code instead.
+    $ErrorActionPreference = "Continue"
+    & gh release view $tag *> $null
+    $releaseExists = $LASTEXITCODE -eq 0
+} finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+}
 
 if ($releaseExists) {
     Write-Host "release: uploading Windows assets to $tag" -ForegroundColor Cyan

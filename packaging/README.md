@@ -40,16 +40,24 @@ cd dist/mac && ditto -c -k --keepParent annotate-tool.app annotate-tool-mac.zip
 
 ## リリース
 
-ビルド成果物は GitHub Releases に。
-`pyproject.toml` の `version` に合わせたタグで作成する。
+GitHub CLI でログインしてから、リリースする OS 上で実行する。
+ビルド、zip 作成、GitHub Releases への公開まで一度に行う。
 
 ```powershell
-gh release create v0.1.0 dist\win\annotate-tool-setup-0.1.0.exe `
-  --title "v0.1.0" --notes "Windows 版 初回リリース"
+# Windows
+.\packaging\release-windows.ps1
 ```
 
-`--draft` で非公開。
-既存リリースへの追加は `gh release upload v0.1.0 <file>`。
+```sh
+# macOS
+bash packaging/release-mac.sh
+```
+
+`pyproject.toml` の `version` からタグ名 (`v<version>`) と成果物名を決める。
+そのタグのリリースがなければ自動生成したリリースノートで作成し、すでにあれば
+該当 OS の成果物を追加する。同名の成果物は置き換えるので再実行できる。
+
+Windows 版は installer と portable zip の両方を公開するため、Inno Setup が必要。
 
 ## 署名
 

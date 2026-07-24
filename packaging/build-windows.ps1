@@ -52,6 +52,8 @@ $version = $Matches[1]
 
 # Portable build for anyone who cannot or does not want to run an installer.
 $zip = "dist\win\annotate-tool-$version-win.zip"
+Write-Host "zip: waiting 3 seconds for file scanners" -ForegroundColor Cyan
+Start-Sleep -Seconds 3
 Write-Host "zip: $zip" -ForegroundColor Cyan
 Compress-Archive -Path dist\win\annotate-tool -DestinationPath $zip -CompressionLevel Optimal -Force
 
